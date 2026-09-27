@@ -1,0 +1,18 @@
+# Binary search plays guess-the-number against itself
+let lo = 1
+let hi = 100
+let secret = 73
+let tries = 0
+while lo <= hi {
+  tries = tries + 1
+  let mid = floor((lo + hi) / 2)
+  if mid == secret {
+    print ("found " + str(mid) + " in " + str(tries))
+    break
+  }
+  if mid < secret {
+    lo = mid + 1
+  } else {
+    hi = mid - 1
+  }
+}

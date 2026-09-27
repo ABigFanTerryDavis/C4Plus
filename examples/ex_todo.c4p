@@ -1,0 +1,14 @@
+# Mini todo list with lists + dicts
+let todos = []
+push(todos, {"task": "write code", "done": 0})
+push(todos, {"task": "test code", "done": 0})
+push(todos, {"task": "ship it", "done": 0})
+todos[1]["done"] = 1
+for i, t in todos {
+  let mark = " "
+  if t["done"] == 1 {
+    mark = "x"
+  }
+  print ("[" + mark + "] " + t["task"])
+}
+print ("open: " + str(len(todos) - 1) + "/" + str(len(todos)))

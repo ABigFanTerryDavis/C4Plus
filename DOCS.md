@@ -1,4 +1,4 @@
-# C4Plus — Complete Docs (v0.3.6)
+# C4Plus — Complete Docs (v0.3.7)
 
 C4Plus (`.c4p`) is a small scripting language with headers (`.c4h`),
 assembly sidecars (`.c4asm`), batch files (`.c4bht`), projects
@@ -307,6 +307,21 @@ strings.starts_with("boot.s", "boot")   # 1
 strings.pad_left("42", 5)               # "   42"
 strings.repeat("ab", 3)                 # "ababab"
 strings.lines("a\nb\r\nc")              # ["a", "b", "c"]
+
+import http                # real HTTP(S), script-only like gui
+let r = http.get("https://example.com")  # -> {code, body, headers}
+print r["code"]            # status, e.g. 200 (404 is data, not an error)
+print r["headers"]["content-type"]  # lowercase names, last wins
+let p = http.post(url, "a=1", {"Content-Type": "application/x-www-form-urlencoded"})
+http.put(url, body)        # also patch/delete(url[, body[, headers]])
+http.head(url)             # -> {code, headers} (no body)
+http.options(url)          # full response like get
+http.request("get", url[, body[, headers]])  # generic (any case)
+http.download(url, "f.zip")  # -> {code, bytes, path} (streams to disk)
+http.redirects()           # current max (default 3)
+http.redirects(0)          # 0 = return 3xx as-is with location header
+# bodies cap at 8MB; GET/HEAD/DELETE/OPTIONS with a body is a catchable
+# error; DNS/connect/TLS failures are catchable with try/catch
 ```
 
 ## 7. Assembly side by side (`.c4asm`)
@@ -485,6 +500,7 @@ or native-mode for these):
 
 * the `gui` module (Windows GUI — run it as a script)
 * `os.exec/spawn/pipe/poll/kill/close` (process spawn — script-only)
+* `http` (network — script-only)
 * closures capturing locals (top-level function values compile and
   call fine; only captured-variable capture stays script-side)
 * `#target sim` needs the `cpu` module... no wait, `cpu` compiles.

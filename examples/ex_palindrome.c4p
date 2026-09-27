@@ -1,0 +1,9 @@
+# Palindrome checker
+fn ispal(s) {
+  let t = replace(lower(trim(s)), " ", "")
+  return t == reverse(t)
+}
+print ispal("Racecar")
+print ispal("hello")
+print ispal("nurses run")
+print reverse("abcd")

@@ -1591,6 +1591,9 @@ pub const Emitter = struct {
         if (std.mem.eql(u8, mod, "gui")) {
             return self.fail("'gui' is script-only (Windows GUI); run it with c4c, not --emit-c", .{});
         }
+        if (std.mem.eql(u8, mod, "http")) {
+            return self.fail("'http' is script-only (network); run it with c4c, not --emit-c", .{});
+        }
         if (std.mem.eql(u8, mod, "proc") or std.mem.eql(u8, mod, "os_exec")) {
             return self.fail("process spawn is script-only; run it with c4c, not --emit-c", .{});
         }
@@ -2392,6 +2395,8 @@ pub const Emitter = struct {
                 }
             }
             if (cfn == null) return self.fail("unknown cpu.{s} in emit v1", .{method});
+        } else if (std.mem.eql(u8, module, "http")) {
+            return self.fail("'http' is script-only (network); run it with c4c, not --emit-c", .{});
         } else {
             return self.fail("unknown module '{s}'", .{module});
         }

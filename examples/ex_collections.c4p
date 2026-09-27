@@ -1,0 +1,9 @@
+# Collections: sort/unique/reverse/sum in one pipeline
+let xs = [5, 3, 5, 1, 3, 9, 1]
+print sort(xs)
+print unique(xs)
+print reverse(sort(unique(xs)))
+print sum(xs)
+print min_of(xs)
+print max_of(xs)
+print count(xs, 5)

@@ -1323,6 +1323,8 @@ const Parser = struct {
     imported_hex: bool = false,
     imported_random: bool = false,
     imported_strings: bool = false,
+    imported_http: bool = false,
+    http_redirects: u16 = 3,
     gui_cbs: ?*std.ArrayList(Value) = null,
     envmap: ?*const std.process.Environ.Map = null,
     cli_args: *ListObj,
@@ -1398,6 +1400,8 @@ const Parser = struct {
             .imported_hex = self.imported_hex,
             .imported_random = self.imported_random,
             .imported_strings = self.imported_strings,
+            .imported_http = self.imported_http,
+            .http_redirects = self.http_redirects,
             .gui_cbs = self.gui_cbs,
             .imported_cpu = self.imported_cpu,
             .envmap = self.envmap,
@@ -1446,6 +1450,8 @@ const Parser = struct {
             .imported_hex = self.imported_hex,
             .imported_random = self.imported_random,
             .imported_strings = self.imported_strings,
+            .imported_http = self.imported_http,
+            .http_redirects = self.http_redirects,
             .gui_cbs = self.gui_cbs,
             .imported_cpu = self.imported_cpu,
             .envmap = self.envmap,
@@ -1605,8 +1611,10 @@ const Parser = struct {
                         self.gui_cbs = self.alloc.create(std.ArrayList(Value)) catch return ParseError.OutOfMemory;
                         self.gui_cbs.?.* = .empty;
                     }
+                } else if (std.mem.eql(u8, mod, "http")) {
+                    self.imported_http = true;
                 } else {
-                    if (!self.mute)                     std.debug.print("{s}:{d}: unknown module '{s}' (only 'os'/'physics'/'json'/'time'/'heap'/'cpu'/'hex'/'random'/'strings'/'gui' or \"file.c4h\")\n", .{ self.file, self.line, mod });
+                    if (!self.mute)                     std.debug.print("{s}:{d}: unknown module '{s}' (only 'os'/'physics'/'json'/'time'/'heap'/'cpu'/'hex'/'random'/'strings'/'gui'/'http' or \"file.c4h\")\n", .{ self.file, self.line, mod });
                     return ParseError.UnknownKeyword;
                 }
             }
@@ -2368,6 +2376,8 @@ const Parser = struct {
             .imported_hex = self.imported_hex,
             .imported_random = self.imported_random,
             .imported_strings = self.imported_strings,
+            .imported_http = self.imported_http,
+            .http_redirects = self.http_redirects,
             .gui_cbs = self.gui_cbs,
             .imported_cpu = self.imported_cpu,
             .envmap = self.envmap,
@@ -2403,6 +2413,8 @@ const Parser = struct {
         if (sub.imported_hex) self.imported_hex = sub.imported_hex or self.imported_hex;
         if (sub.imported_random) self.imported_random = sub.imported_random or self.imported_random;
         if (sub.imported_strings) self.imported_strings = sub.imported_strings or self.imported_strings;
+        if (sub.imported_http) self.imported_http = sub.imported_http or self.imported_http;
+        self.http_redirects = sub.http_redirects;
     }
 
     fn parseStructDef(self: *Parser) anyerror!void {
@@ -2528,6 +2540,8 @@ const Parser = struct {
             .imported_hex = self.imported_hex,
             .imported_random = self.imported_random,
             .imported_strings = self.imported_strings,
+            .imported_http = self.imported_http,
+            .http_redirects = self.http_redirects,
             .gui_cbs = self.gui_cbs,
             .imported_cpu = self.imported_cpu,
             .envmap = self.envmap,
@@ -2708,6 +2722,9 @@ const Parser = struct {
         }
         if (std.mem.eql(u8, module, "strings")) {
             return try self.callStringsMethod(method, arg_vals);
+        }
+        if (std.mem.eql(u8, module, "http")) {
+            return try self.callHttpMethod(method, arg_vals);
         }
         if (!std.mem.eql(u8, module, "os")) {
             if (!self.mute) std.debug.print("error on line {d}: unknown module '{s}'\n", .{ self.line, module });
@@ -3832,6 +3849,235 @@ const Parser = struct {
         }
         const id = try gui.addControl(win, ctrl);
         return Value{ .number = @floatFromInt(id) };
+    }
+
+    const httpBodyCap: usize = 8 * 1024 * 1024;
+
+    fn httpFail(self: *Parser, comptime fmt: []const u8, args: anytype) anyerror {
+        const msg = try std.fmt.allocPrint(self.alloc, fmt, args);
+        if (self.err) |e| e.fail_msg = msg;
+        return ParseError.FailSignal;
+    }
+
+    fn httpHeaderList(self: *Parser, v: Value) anyerror![]std.http.Header {
+        if (v != .dict) return ParseError.TypeError;
+        var it = v.dict.map.iterator();
+        var list: std.ArrayList(std.http.Header) = .empty;
+        while (it.next()) |e| {
+            const name = e.key_ptr.*;
+            const val = try self.valueToString(e.value_ptr.*);
+            if (name.len == 0 or std.mem.indexOfScalar(u8, name, ':') != null or
+                std.mem.indexOf(u8, name, "\r") != null or std.mem.indexOf(u8, name, "\n") != null or
+                std.mem.indexOf(u8, val, "\r") != null or std.mem.indexOf(u8, val, "\n") != null)
+            {
+                return self.httpFail("bad http header '{s}'", .{name});
+            }
+            try list.append(self.alloc, .{ .name = name, .value = val });
+        }
+        return try list.toOwnedSlice(self.alloc);
+    }
+
+    fn httpEmptyHeaders(self: *Parser) anyerror!*DictObj {
+        const hd = try self.alloc.create(DictObj);
+        hd.* = .{ .map = std.StringHashMap(Value).init(self.alloc) };
+        return hd;
+    }
+
+    fn httpDo(self: *Parser, method: std.http.Method, url: []const u8, payload: ?[]const u8, headers: []std.http.Header, want_body: bool) anyerror!Value {
+        const uri = std.Uri.parse(url) catch {
+            return self.httpFail("bad http url '{s}'", .{url});
+        };
+        if (uri.scheme.len == 0 or (!std.mem.eql(u8, uri.scheme, "http") and !std.mem.eql(u8, uri.scheme, "https"))) {
+            return self.httpFail("only http:// and https:// urls", .{});
+        }
+        var client: std.http.Client = .{ .allocator = self.alloc, .io = self.io };
+        defer client.deinit();
+        const rb: std.http.Client.Request.RedirectBehavior = if (payload != null or self.http_redirects == 0) .unhandled else @enumFromInt(self.http_redirects);
+        var req = client.request(method, uri, .{ .redirect_behavior = rb, .extra_headers = headers }) catch |err| {
+            if (err == error.UnknownHostName) return self.httpFail("http dns lookup failed for '{s}'", .{url});
+            if (err == error.Unexpected or err == error.ConnectionRefused or err == error.NetworkUnreachable or err == error.ConnectionResetByPeer or err == error.ConnectionTimedOut) {
+                return self.httpFail("http connection failed for '{s}'", .{url});
+            }
+            return self.httpFail("http request failed: {s}", .{@errorName(err)});
+        };
+        defer req.deinit();
+        if (payload) |p| {
+            req.transfer_encoding = .{ .content_length = p.len };
+            var body = req.sendBodyUnflushed(&.{}) catch |err| {
+                return self.httpFail("http request failed: {s}", .{@errorName(err)});
+            };
+            body.writer.writeAll(p) catch |err| {
+                return self.httpFail("http request failed: {s}", .{@errorName(err)});
+            };
+            body.end() catch |err| {
+                return self.httpFail("http request failed: {s}", .{@errorName(err)});
+            };
+            req.connection.?.flush() catch |err| {
+                return self.httpFail("http request failed: {s}", .{@errorName(err)});
+            };
+        } else {
+            req.sendBodiless() catch |err| {
+                return self.httpFail("http request failed: {s}", .{@errorName(err)});
+            };
+        }
+        var rbuf: [8192]u8 = undefined;
+        var response = req.receiveHead(&rbuf) catch |err| {
+            return self.httpFail("http request failed: {s}", .{@errorName(err)});
+        };
+        const d = try self.alloc.create(DictObj);
+        d.* = .{ .map = std.StringHashMap(Value).init(self.alloc) };
+        try d.map.put(try self.alloc.dupe(u8, "code"), Value{ .number = @floatFromInt(@intFromEnum(response.head.status)) });
+        const hd = try self.httpEmptyHeaders();
+        var lines = std.mem.splitSequence(u8, response.head.bytes, "\r\n");
+        _ = lines.next();
+        while (lines.next()) |line| {
+            if (line.len == 0) break;
+            const idx = std.mem.indexOfScalar(u8, line, ':') orelse continue;
+            const name = std.mem.trim(u8, line[0..idx], " \t");
+            const val = std.mem.trim(u8, line[idx + 1 ..], " \t");
+            if (name.len == 0) continue;
+            const lname = try std.ascii.allocLowerString(self.alloc, name);
+            try hd.map.put(lname, Value{ .string = try self.alloc.dupe(u8, val) });
+        }
+        try d.map.put(try self.alloc.dupe(u8, "headers"), Value{ .dict = hd });
+        if (!want_body) return Value{ .dict = d };
+        if (response.head.content_length) |cl| {
+            if (cl > httpBodyCap) return self.httpFail("http response over 8MB cap", .{});
+        }
+        var aw: std.Io.Writer.Allocating = .init(self.alloc);
+        var tbuf: [8192]u8 = undefined;
+        var reader = response.reader(&tbuf);
+        _ = reader.streamRemaining(&aw.writer) catch {
+            return self.httpFail("http body read failed", .{});
+        };
+        aw.writer.flush() catch |err| {
+            return self.httpFail("http request failed: {s}", .{@errorName(err)});
+        };
+        const body = aw.written();
+        if (body.len > httpBodyCap) return self.httpFail("http response over 8MB cap", .{});
+        try d.map.put(try self.alloc.dupe(u8, "body"), Value{ .string = body });
+        return Value{ .dict = d };
+    }
+
+    fn callHttpMethod(self: *Parser, method: []const u8, arg_vals: []const Value) anyerror!Value {
+        if (!self.imported_http) {
+            if (!self.mute) std.debug.print("error on line {d}: 'http' used without 'import http'\n", .{self.line});
+            return ParseError.UnknownKeyword;
+        }
+        if (std.mem.eql(u8, method, "redirects")) {
+            if (arg_vals.len > 1) return ParseError.ArityMismatch;
+            if (arg_vals.len == 1) {
+                if (arg_vals[0] != .number) return ParseError.TypeError;
+                const n = arg_vals[0].number;
+                if (n != @trunc(n) or n < 0 or n > 10) {
+                    if (!self.mute) std.debug.print("error on line {d}: http.redirects needs 0..10\n", .{self.line});
+                    return ParseError.TypeError;
+                }
+                self.http_redirects = @intFromFloat(n);
+            }
+            return Value{ .number = @floatFromInt(self.http_redirects) };
+        }
+        if (std.mem.eql(u8, method, "download")) {
+            if (arg_vals.len < 2 or arg_vals.len > 3) return ParseError.ArityMismatch;
+            if (arg_vals[0] != .string or arg_vals[1] != .string) return ParseError.TypeError;
+            const url = arg_vals[0].string;
+            const path = arg_vals[1].string;
+            var headers: []std.http.Header = &.{};
+            if (arg_vals.len == 3) headers = try self.httpHeaderList(arg_vals[2]);
+            if (self.dry) {
+                const d = try self.alloc.create(DictObj);
+                d.* = .{ .map = std.StringHashMap(Value).init(self.alloc) };
+                try d.map.put(try self.alloc.dupe(u8, "code"), Value{ .number = 0 });
+                try d.map.put(try self.alloc.dupe(u8, "bytes"), Value{ .number = 0 });
+                try d.map.put(try self.alloc.dupe(u8, "path"), Value{ .string = try self.alloc.dupe(u8, path) });
+                return Value{ .dict = d };
+            }
+            const r = try self.httpDo(.GET, url, null, headers, true);
+            const body = r.dict.map.get("body").?.string;
+            std.Io.Dir.cwd().writeFile(self.io, .{ .sub_path = path, .data = body }) catch {
+                return self.httpFail("http download: cannot write '{s}'", .{path});
+            };
+            const code = r.dict.map.get("code").?.number;
+            const d = try self.alloc.create(DictObj);
+            d.* = .{ .map = std.StringHashMap(Value).init(self.alloc) };
+            try d.map.put(try self.alloc.dupe(u8, "code"), Value{ .number = code });
+            try d.map.put(try self.alloc.dupe(u8, "bytes"), Value{ .number = @floatFromInt(body.len) });
+            try d.map.put(try self.alloc.dupe(u8, "path"), Value{ .string = try self.alloc.dupe(u8, path) });
+            return Value{ .dict = d };
+        }
+        var hm: std.http.Method = .GET;
+        var want_body = true;
+        var ai: usize = 0;
+        if (std.mem.eql(u8, method, "request")) {
+            if (arg_vals.len < 2 or arg_vals.len > 4) return ParseError.ArityMismatch;
+            if (arg_vals[0] != .string) return ParseError.TypeError;
+            const up = try std.ascii.allocUpperString(self.alloc, arg_vals[0].string);
+            if (std.mem.eql(u8, up, "GET")) {
+                hm = .GET;
+            } else if (std.mem.eql(u8, up, "HEAD")) {
+                hm = .HEAD;
+            } else if (std.mem.eql(u8, up, "POST")) {
+                hm = .POST;
+            } else if (std.mem.eql(u8, up, "PUT")) {
+                hm = .PUT;
+            } else if (std.mem.eql(u8, up, "DELETE")) {
+                hm = .DELETE;
+            } else if (std.mem.eql(u8, up, "OPTIONS")) {
+                hm = .OPTIONS;
+            } else if (std.mem.eql(u8, up, "PATCH")) {
+                hm = .PATCH;
+            } else return self.httpFail("unknown http method '{s}'", .{arg_vals[0].string});
+            want_body = hm != .HEAD;
+            ai = 1;
+        } else if (std.mem.eql(u8, method, "get") or std.mem.eql(u8, method, "head") or std.mem.eql(u8, method, "options")) {
+            if (arg_vals.len < 1 or arg_vals.len > 2) return ParseError.ArityMismatch;
+            if (std.mem.eql(u8, method, "head")) {
+                hm = .HEAD;
+                want_body = false;
+            } else if (std.mem.eql(u8, method, "options")) {
+                hm = .OPTIONS;
+            }
+        } else if (std.mem.eql(u8, method, "post") or std.mem.eql(u8, method, "put") or std.mem.eql(u8, method, "patch") or std.mem.eql(u8, method, "delete")) {
+            if (arg_vals.len < 1 or arg_vals.len > 3) return ParseError.ArityMismatch;
+            if (std.mem.eql(u8, method, "post")) {
+                hm = .POST;
+            } else if (std.mem.eql(u8, method, "put")) {
+                hm = .PUT;
+            } else if (std.mem.eql(u8, method, "patch")) {
+                hm = .PATCH;
+            } else hm = .DELETE;
+        } else {
+            if (!self.mute) std.debug.print("error on line {d}: unknown http.{s} (have get/post/put/patch/delete/head/options/request/download/redirects)\n", .{ self.line, method });
+            return ParseError.UnknownFunction;
+        }
+        if (arg_vals.len <= ai or arg_vals[ai] != .string) return ParseError.TypeError;
+        const url = arg_vals[ai].string;
+        var payload: ?[]const u8 = null;
+        var headers: []std.http.Header = &.{};
+        if (arg_vals.len > ai + 1) {
+            if (arg_vals[ai + 1] == .dict) {
+                headers = try self.httpHeaderList(arg_vals[ai + 1]);
+            } else {
+                if (!hm.requestHasBody()) {
+                    return self.httpFail("http {s} cannot carry a body", .{@tagName(hm)});
+                }
+                payload = try self.valueToString(arg_vals[ai + 1]);
+                if (arg_vals.len > ai + 2) headers = try self.httpHeaderList(arg_vals[ai + 2]);
+            }
+        }
+        if (self.dry) {
+            const d = try self.alloc.create(DictObj);
+            d.* = .{ .map = std.StringHashMap(Value).init(self.alloc) };
+            try d.map.put(try self.alloc.dupe(u8, "code"), Value{ .number = 0 });
+            if (want_body) try d.map.put(try self.alloc.dupe(u8, "body"), Value{ .string = try self.alloc.dupe(u8, "") });
+            const hd = try self.httpEmptyHeaders();
+            for ([_][]const u8{ "content-type", "content-length", "date", "server", "connection", "location", "transfer-encoding", "content-encoding", "set-cookie", "cache-control", "etag", "x-custom" }) |k| {
+                try hd.map.put(try self.alloc.dupe(u8, k), Value{ .string = try self.alloc.dupe(u8, "") });
+            }
+            try d.map.put(try self.alloc.dupe(u8, "headers"), Value{ .dict = hd });
+            return Value{ .dict = d };
+        }
+        return try self.httpDo(hm, url, payload, headers, want_body);
     }
 
     fn callGuiMethod(self: *Parser, method: []const u8, arg_vals: []const Value) anyerror!Value {
@@ -5962,6 +6208,8 @@ const JsonParser = struct {
             .imported_hex = self.imported_hex,
             .imported_random = self.imported_random,
             .imported_strings = self.imported_strings,
+            .imported_http = self.imported_http,
+            .http_redirects = self.http_redirects,
             .gui_cbs = self.gui_cbs,
             .imported_cpu = self.imported_cpu,
             .envmap = self.envmap,

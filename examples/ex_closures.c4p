@@ -1,0 +1,15 @@
+# Closures: each counter gets its own private n
+fn counter() {
+  let n = 0
+  fn inc() {
+    n = n + 1
+    return n
+  }
+  return inc
+}
+let a = counter()
+let b = counter()
+print a()
+print a()
+print b()
+print a()

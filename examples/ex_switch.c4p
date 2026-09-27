@@ -1,0 +1,10 @@
+# Switch with comma-separated cases
+for day in 1..7 {
+  let label = ""
+  switch day {
+    1, 7 { label = "weekend" }
+    3 { label = "hump day" }
+    else { label = "weekday" }
+  }
+  print (str(day) + " is " + label)
+}

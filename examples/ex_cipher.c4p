@@ -1,0 +1,18 @@
+# Caesar cipher with ord/chr
+fn enc(s, shift) {
+  let out = ""
+  for ch in s {
+    let c = ord(ch)
+    if c >= 97 and c <= 122 {
+      c = 97 + (c - 97 + shift) % 26
+    }
+    if c >= 65 and c <= 90 {
+      c = 65 + (c - 65 + shift) % 26
+    }
+    out = out + chr(c)
+  }
+  return out
+}
+let secret = enc("Hello, World", 3)
+print secret
+print enc(secret, 23)

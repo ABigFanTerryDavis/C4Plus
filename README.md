@@ -423,6 +423,10 @@ strings.starts_with("boot.s", "boot")   # 1
 strings.pad_left("42", 5)               # "   42"
 strings.repeat("ab", 3)                 # "ababab"
 strings.lines("a\nb\r\nc")              # ["a", "b", "c"]
+
+import http                # real HTTP(S), script-only like gui
+let r = http.get("https://example.com")  # -> {code, body, headers}
+http.post(url, body, headers)  # also put/patch/delete/head/options/request/download/redirects
 ```
 
 ---
@@ -723,7 +727,7 @@ rt/             runtimes: c4rt.c/h (hosted), c4rt_fs.c/h (freestanding), irq.s, 
 boot/           stage-1 boot sector + linker scripts
 user/           ring-3 programs (hello.s, pong.s) + mkelf.py ELF wrapper
 examples/       small programs per feature (also used as tests)
-templates/      numbered walkthroughs 01_hello .. 59_sched (+ .c4asm sidecars)
+templates/      numbered walkthroughs 01_hello .. 60_http (+ .c4asm sidecars)
 build.zig       build definition (version lives here)
 build.zig.zon   package manifest (version mirrored here)
 DOCS.md         full language + kernel reference
@@ -739,8 +743,8 @@ recipe.
 
 ## Versioning
 
-The version lives in two places — `build.zig` (`const version = "0.3.6"`) and
-`build.zig.zon` (`.version = "0.3.6"`) — and each release is snapshotted as
+The version lives in two places — `build.zig` (`const version = "0.3.7"`) and
+`build.zig.zon` (`.version = "0.3.7"`) — and each release is snapshotted as
 `zip/c4plus-<version>-src.zip` (older snapshots are kept). `zip/` is local history and
 stays out of git; public releases go through GitHub releases.
 
@@ -748,7 +752,9 @@ stays out of git; public releases go through GitHub releases.
 
 ## Roadmap
 
-- **0.3.7 (next):** fix the `59_sched` switch (per-task kernel stacks + TSS reload, switch
+- **0.3.7 (this):** the `http` module (get/post/put/patch/delete/head/options/request/
+  download/redirects, response headers, catchable errors) + 10 new examples.
+- **Next:** fix the `59_sched` switch (per-task kernel stacks + TSS reload, switch
   tracer, ESP validation), five `got N` lines + `all tasks done`, plus a couple of small
   GUI extras.
 - After that: exit/reap cleanup, blocking-receive hardening, filesystem + drivers, shell.

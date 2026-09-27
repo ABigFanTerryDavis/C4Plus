@@ -1,0 +1,15 @@
+# Star triangle with nested loops
+for r in 1..5 {
+  let line = ""
+  for c in 1..r {
+    line = line + "*"
+  }
+  print line
+}
+for r in 4..1 {
+  let line = ""
+  for c in 1..r {
+    line = line + "*"
+  }
+  print line
+}
