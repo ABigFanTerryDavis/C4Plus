@@ -1,0 +1,13 @@
+# 30_bits — bitwise ops for flags/registers
+let flags = 10
+print (flags & 12)
+print (flags | 1)
+print (flags ^ 15)
+print (~flags)
+print (1 << 4)
+print (256 >> 3)
+let r = 0
+r = r | 4
+r = r | 2
+print r
+print (r & 4)

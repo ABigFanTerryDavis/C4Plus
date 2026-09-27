@@ -1,0 +1,60 @@
+# Every C4Plus GUI widget in one window
+import gui
+
+fn on_click(ev) {
+  gui.set_text(w, out, "clicked button")
+  gui.set(w, bar, (gui.get(w, bar) + 7) % 101)
+}
+fn on_slider(ev) {
+  gui.set_text(w, out, "slider = " + str(gui.get(w, vol)))
+}
+fn on_list(ev) {
+  let i = gui.list_sel(w, files)
+  if i >= 0 {
+    gui.set_text(w, out, "selected: " + gui.list_get(w, files, i))
+  }
+}
+fn on_check(ev) {
+  gui.set_text(w, out, "repeat = " + str(gui.get(w, loop)))
+}
+
+let w = gui.window("C4Plus widgets", 560, 460)
+gui.theme(w, "midnight")
+let out = gui.label(w, "ready", 16, 12, 500, 24)
+let enter = gui.textbox(w, "type + enter", 16, 44, 240, 30)
+gui.on(w, enter, on_click)
+let go = gui.button(w, "Go", on_click, 268, 44, 90, 30)
+let vol = gui.slider(w, 0, 100, 35)
+gui.on(w, vol, on_slider)
+let bar = gui.progress(w, 0, 40)
+let loop = gui.checkbox(w, "repeat")
+gui.on(w, loop, on_check)
+let files = gui.list(w)
+gui.on(w, files, on_list)
+gui.list_add(w, files, "alpha")
+gui.list_add(w, files, "beta")
+gui.list_add(w, files, "gamma")
+
+gui.tick(w, 250)
+let loops = 0
+while gui.alive(w) {
+  let ev = gui.wait(w)
+  if ev == nil {
+    break
+  }
+  if ev["type"] == "tick" {
+    loops = loops + 1
+    if loops > 80 {
+      gui.post_close(w)
+    }
+  } else {
+    if ev["type"] == "key" and ev["key"] == "enter" {
+      let t = gui.get_text(w, enter)
+      if len(t) > 0 {
+        gui.list_add(w, files, t)
+        gui.set_text(w, enter, "")
+      }
+    }
+  }
+}
+print "widgets window closed"

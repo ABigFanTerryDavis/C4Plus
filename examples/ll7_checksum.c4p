@@ -1,0 +1,7 @@
+# LL7 — checksum like a boot header (bytes sum to 0 mod 256)
+let hdr = [2, 176, 173, 27]
+let sum = 0
+for b in hdr {
+  sum = sum + b
+}
+print (256 - (sum % 256))

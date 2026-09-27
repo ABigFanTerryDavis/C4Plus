@@ -1,0 +1,10 @@
+let mem = bytes(16)
+print len(mem)
+poke(mem, 0, 255)
+poke(mem, 15, 65)
+print peek(mem, 0)
+print peek(mem, 15)
+print peek(mem, 0) + peek(mem, 1)
+import os
+os.writebytes("zig-out/boot16.bin", [80, 65, 0, 255])
+print os.readbytes("zig-out/boot16.bin")

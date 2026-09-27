@@ -1,0 +1,7 @@
+# JSON config round trip
+import json
+let cfg = json.parse("{\"name\": \"demo\", \"ports\": [80, 443]}")
+print cfg["name"]
+print cfg["ports"][1]
+cfg["debug"] = 1
+print json.stringify(cfg)

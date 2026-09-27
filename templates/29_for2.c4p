@@ -1,0 +1,13 @@
+# 29_for2 — two-var loops + dict/string iteration
+for i, x in ["a", "b"] {
+  print (str(i) + ":" + x)
+}
+for k, v in {"x": 1} {
+  print (k + "=" + str(v))
+}
+for i, ch in "hi" {
+  print (str(i) + "=" + ch)
+}
+for k in {"a": 1} {
+  print k
+}

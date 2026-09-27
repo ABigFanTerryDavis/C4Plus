@@ -1,0 +1,13 @@
+print u8(300)
+print i8(200)
+print u16(70000)
+print i32(2147483648)
+print sizeof("BBHI")
+print sizeof(">Ih")
+let gdt = pack("<BBHI", [255, 0, 4194303, 190])
+print gdt
+print len(gdt)
+print unpack("<BBHI", gdt)
+print pack(">H", [4660])
+print unpack(">H", pack(">H", [4660]))
+print unpack("b", pack("b", [0 - 5]))

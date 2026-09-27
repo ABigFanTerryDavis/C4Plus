@@ -1,0 +1,6 @@
+# 18_input_echo — needs stdin (pipe or type)
+let name = input("name: ")
+print ("hi " + name)
+let n = int(input("pick a number: "))
+print (n * 2)
+print str(n)

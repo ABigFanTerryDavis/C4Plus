@@ -1,0 +1,10 @@
+# 25_args — run: c4c run 25_args.c4p Ada
+let who = "world"
+if len(args()) > 0 {
+  who = args()[0]
+}
+print ("hi " + who)
+for a in args() {
+  print ("- " + a)
+}
+exit(0)

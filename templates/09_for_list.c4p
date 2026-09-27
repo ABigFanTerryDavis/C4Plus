@@ -1,0 +1,8 @@
+# 09_for_list — iterate values
+let xs = ["a", "b", "c"]
+for x in xs {
+  print x
+}
+for n in [1, 2, 3] {
+  print (n * 2)
+}

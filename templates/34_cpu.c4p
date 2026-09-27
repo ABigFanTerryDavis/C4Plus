@@ -1,0 +1,16 @@
+# 34_cpu — countdown program on the sim machine
+import cpu
+let m = cpu.new(64)
+cpu.step(m, "li", 0, 5)
+cpu.step(m, "li", 1, 1)
+# loop: r0 -= 1 until 0
+cpu.step(m, "sub", 0, 1)
+print cpu.reg(m, 0)
+cpu.step(m, "sub", 0, 1)
+print cpu.reg(m, 0)
+cpu.step(m, "sw", 0, 32)
+cpu.step(m, "li", 0, 0)
+cpu.step(m, "lw", 0, 32)
+print cpu.reg(m, 0)
+cpu.step(m, "halt", 0, 0)
+print cpu.reg(m, 0)

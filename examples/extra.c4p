@@ -1,0 +1,5 @@
+pt("Hi from pt parens")
+print("escaped\nnewline")
+# comment
+// comment
+print "semi";

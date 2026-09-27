@@ -1,0 +1,7 @@
+# LL6 — assemble + run a summing loop
+import cpu
+import "examples/ll6_sum.c4asm"
+let m = cpu.new(32)
+print cpu.run(m, ll6_sum)
+print cpu.reg(m, 0)
+print cpu.reg(m, 1)

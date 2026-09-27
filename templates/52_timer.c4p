@@ -1,0 +1,52 @@
+# 52_timer — PIT timer interrupts in a freestanding C4Plus kernel.
+# Build (needs irq.o linked):
+#   c4c --emit-c 52_timer.c4p --freestanding -o timer.c
+#   gcc -m32 -ffreestanding -nostdlib -c -o timer.o timer.c -I rt
+#   gcc -m32 -ffreestanding -nostdlib -c -o fs.o rt/c4rt_fs.c
+#   as --32 rt/irq.s -o irq.o
+#   as --32 boot/boot.s -o boot.o
+#   ld -m i386pe -T boot/linkflat.ld -o timer.pe timer.o fs.o irq.o
+#   objcopy -O binary timer.pe timer.bin
+#   ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
+#   objcopy -O binary -j .boot boot.pe boot.bin
+#   cat boot.bin timer.bin > tdisk.img   (pad kernel area to 32K)
+#   qemu-system-i386 -drive format=raw,file=tdisk.img -display none ^
+#     -debugcon file:zig-out/t.log -device isa-debug-exit,iobase=0xf4,iosize=0x04
+# Expect tick prints; qemu exit = (code<<1)|1.
+
+# remap the PIC: IRQ0-15 -> vectors 0x20-0x2F, only timer unmasked
+outb(32, 17)
+outb(160, 17)
+outb(33, 32)
+outb(161, 40)
+outb(33, 4)
+outb(161, 2)
+outb(33, 1)
+outb(161, 1)
+outb(33, 254)
+outb(161, 255)
+
+# PIT channel 0 at 100Hz (divisor 11931 = 0x2E9B)
+outb(67, 52)
+outb(64, 155)
+outb(64, 46)
+
+# IDT gate 0x20 -> irq0 stub, then load + enable
+idt_set(32, irq_addr(), 8, 142)
+idt_load()
+sti()
+print "timer on"
+
+let last = 0
+while ticks() < 300 {
+  let t = ticks()
+  if t != last {
+    if t % 50 == 0 {
+      print t
+    }
+    last = t
+  }
+}
+cli()
+print "timer off"
+exit(0)

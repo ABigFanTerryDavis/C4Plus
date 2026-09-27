@@ -1,0 +1,6 @@
+# LL3 — descriptor pack/unpack round trip
+let desc = pack("<BBHI", [255, 171, 4660, 190])
+print desc
+print unpack("<BBHI", desc)
+print sizeof("<BBHI")
+print pack(">H", [4660])

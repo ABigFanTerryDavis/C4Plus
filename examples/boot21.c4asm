@@ -1,0 +1,4 @@
+#target x86-64
+.entry start
+start:
+  mov $42, %rax

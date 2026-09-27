@@ -1,0 +1,42 @@
+#target x86-64
+# shell_io.c4asm — port-I/O bridge for the xos shell (KERNEL ONLY).
+# Callable from C4Plus as shell_io(): sends an 'A' beacon to QEMU debugcon
+# port 0xE9 so you can prove the bridge linked and runs. 32-bit forms on
+# purpose: the kernel builds with gcc -m32 (C4Plus boot/ + xos are i386).
+# Validate: c4c check examples/shell_fs.c4p
+# NOTE: never `c4c run` a file importing this — x86-64 asm needs --emit-c.
+# ---------------------------------------------------------------------------
+# YASHAR RECIPE (xos kernel.c / bridge .c file):
+# 1. Transpile the pure logic (no input() in it, so fs-emit accepts it):
+#      c4c --emit-c examples/shell_fs.c4p --freestanding -o shell_k.c
+#    That gives you f_run_cmd() (static C4Val f_run_cmd(C4Val v_line)).
+# 2. Override the weak c4_write() from rt/c4rt_fs.c with a VGA writer:
+#      void c4_write(const char *s, unsigned n) {
+#        static unsigned short *vg = (unsigned short *)0xB8000;
+#        static unsigned pos = 0;
+#        for (unsigned i = 0; i < n; i++) {
+#          if (s[i] == '\n') { pos = (pos / 80 + 1) * 80; }
+#          else { vg[pos++] = (unsigned short)s[i] | 0x0700; }
+#          if (pos >= 80 * 25) pos = 0;
+#        }
+#      }
+# 3. Poll the PS/2 keyboard (set-1 scancodes, no IDT needed for v1):
+#      static unsigned char inb(unsigned short p) {
+#        unsigned char v;
+#        __asm__ volatile("inb %1, %0" : "=a"(v) : "Nd"(p));
+#        return v;
+#      }
+#      static int kbd_ready(void) { return inb(0x64) & 1; }
+#      static unsigned char kbd_read(void) { return inb(0x60); }
+#    Map make-codes via a 128-entry table (0x1C enter, 0x0E backspace,
+#    0x39 space, 0x02..0x0B digits 1..0, 0x10..0x19 q..p row, ignore 0x80+
+#    break codes), append to a line buffer, echo via c4_write().
+# 4. kmain loop: k_readline(buf) -> f_run_cmd(c4_str(buf)) ->
+#    c4_tostring() -> c4_write(). Act on sentinels "__EXIT__" (hlt loop)
+#    and "__CLEAR__" (fill 0xB8000 with spaces, reset pos).
+# ---------------------------------------------------------------------------
+.entry shell_io
+shell_io:
+  mov $0xE9, %dx ; QEMU debugcon port
+  mov $0x41, %al ; 'A' beacon: bridge alive
+  outb %al, %dx

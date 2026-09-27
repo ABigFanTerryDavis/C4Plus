@@ -1,0 +1,7 @@
+# 35_sys — host control: cwd, listdir, env, mkdir
+import os
+print os.cwd()
+print len(os.listdir("."))
+os.mkdir("zig-out/t35demo")
+print os.exists("zig-out/t35demo")
+print len(os.env("PATH"))

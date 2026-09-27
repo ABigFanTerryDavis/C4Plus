@@ -1,0 +1,58 @@
+# Custom drawing + animation + keyboard input
+import gui
+
+fn on_key(ev) {
+  state["key"] = ev["key"]
+  state["hits"] = state["hits"] + 1
+}
+
+let w = gui.window("C4Plus drawing", 600, 420)
+gui.theme(w, "midnight")
+gui.font(w, 14)
+let state = {"x": 60.0, "y": 60.0, "dx": 2.5, "key": "", "hits": 0}
+let caption = gui.label(w, "arrows move the dot - esc quits", 16, 12, 560, 22)
+
+gui.tick(w, 33)
+while gui.alive(w) {
+  let ev = gui.wait(w)
+  if ev == nil {
+    break
+  }
+  if ev["type"] == "key" {
+    on_key(ev)
+    if ev["key"] == "esc" {
+      gui.quit(w)
+    }
+    if ev["key"] == "right" {
+      state["dx"] = 2.5
+    }
+    if ev["key"] == "left" {
+      state["dx"] = -2.5
+    }
+  } else {
+    if ev["type"] == "tick" {
+      state["x"] = state["x"] + state["dx"]
+      if state["x"] < 20 {
+        state["x"] = 20
+        state["dx"] = -state["dx"]
+      }
+      if state["x"] > 560 {
+        state["x"] = 560
+        state["dx"] = -state["dx"]
+      }
+      gui.fill(w, 16, 44, 568, 340, gui.color(0x18000000))
+      for i in 0..20 {
+        let bx = 20 + i * 28
+        let bh = 40 + (i * 37) % 220
+        gui.fill(w, bx, 380 - bh, 22, bh, gui.color("steelblue"))
+      }
+      gui.outline(w, 16, 44, 568, 340, gui.color(0x55FFFFFF))
+      gui.fill(w, state["x"] - 9, state["y"] - 9, 18, 18, gui.color("cyan"))
+      gui.text(w, 20, 46, "keys: " + state["key"] + "  hits: " + str(state["hits"]), gui.color("white"))
+      if state["hits"] > 40 {
+        gui.quit(w)
+      }
+    }
+  }
+}
+print "drawing window closed"

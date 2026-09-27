@@ -1,0 +1,4 @@
+import "examples/boot21.c4asm"
+print "loaded"
+boot21()
+print "back"

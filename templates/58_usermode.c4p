@@ -1,0 +1,87 @@
+# 58_usermode — ring-3 user program via ELF + int 0x80 syscalls.
+# Build:
+#   gcc -m32 -nostdlib -static -Wl,-Ttext,0x400000 -e _start -o zig-out/user.elf user/hello.c
+#   objcopy -I binary -O elf32-i386 -B i386 zig-out/user.elf zig-out/user_data.o
+#   gcc -m32 -ffreestanding -nostdlib -c -o zig-out/userblob.o rt/userblob.c -I rt
+#   c4c --emit-c 58_usermode.c4p --freestanding -o um.c
+#   gcc -m32 -ffreestanding -nostdlib -c -o um.o um.c -I rt
+#   gcc -m32 -ffreestanding -nostdlib -c -o fs.o rt/c4rt_fs.c
+#   as --32 rt/irq.s -o irq.o
+#   as --32 boot/boot.s -o boot.o
+#   ld -m i386pe -T boot/linkflat.ld -o um.pe um.o fs.o irq.o zig-out/user_data.o zig-out/userblob.o
+#   objcopy -O binary um.pe um.bin
+#   ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
+#   objcopy -O binary -j .boot boot.pe boot.bin
+#   cat boot.bin um.bin > udisk.img   (pad kernel area to 32K)
+#   qemu-system-i386 -drive format=raw,file=udisk.img -display none ^
+#     -debugcon file:zig-out/u.log -device isa-debug-exit,iobase=0xf4,iosize=0x04
+# Expect: user hello, ring3 proof, exit 199 (= exit 99 via syscall).
+
+# full GDT: null, kcode, kdata, ucode, udata, tss
+gdt_set(1, 0, 4294967295, 154, 207)
+gdt_set(2, 0, 4294967295, 146, 207)
+gdt_set(3, 0, 4294967295, 250, 207)
+gdt_set(4, 0, 4294967295, 242, 207)
+gdt_load()
+tss(589824)
+
+# paging with user pages: PD[0] identity 0-4MB (supervisor below
+# 0x400000), PD[1] maps 4-8MB user (code at 0x400000), PD[2] maps
+# 8-12MB user (stack at 0x800000).
+poke32(524288, 528387)
+poke32(524292, 532487)
+poke32(524296, 536583)
+let i = 0
+while i < 1024 {
+  let flags = 3
+  if i * 4096 >= 4194304 {
+    flags = 7
+  }
+  poke32(528384 + i * 4, i * 4096 + flags)
+  i = i + 1
+}
+let j = 0
+while j < 1024 {
+  poke32(532480 + j * 4, 4194304 + j * 4096 + 7)
+  poke32(536576 + j * 4, 8388608 + j * 4096 + 7)
+  j = j + 1
+}
+cr3(524288)
+pg_on()
+print "user paging on"
+
+# PIC with timer + keyboard masked out entirely for this demo
+outb(32, 17)
+outb(160, 17)
+outb(33, 32)
+outb(161, 40)
+outb(33, 4)
+outb(161, 2)
+outb(33, 1)
+outb(161, 1)
+outb(33, 255)
+outb(161, 255)
+
+# syscall gate 0x80, DPL=3 so ring 3 can call it
+idt_set(128, syscall_addr(), 8, 238)
+idt_load()
+
+# fault gates 0-31 so crashes print FAULT n instead of silent reboot
+let v = 0
+while v < 32 {
+  idt_set(v, fault_addr(v), 8, 142)
+  v = v + 1
+}
+
+# load the embedded user ELF and jump to ring 3
+print ("user base=" + str(user_base()))
+print ("user len=" + str(user_len()))
+print ("magic=" + str(peek32(user_base())))
+let entry = elf_load(user_base())
+print ("user entry=" + str(entry))
+if entry == 0 {
+  print "bad elf"
+  exit(1)
+}
+enter_user(entry, 8388608)
+print "never here"

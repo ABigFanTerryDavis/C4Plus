@@ -1,0 +1,17 @@
+print ("hello, world")
+print "hello, world"
+pt "Hello, World"
+
+fn add(a, b) {
+  return a + b
+}
+
+fn greet(name) {
+  return "hi " + name
+}
+
+let r = add(2, 3)
+print r
+pt add(10, 20)
+print greet("C4Plus")
+pt ("sum: " + add(5, 7))

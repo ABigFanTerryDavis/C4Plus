@@ -1,0 +1,71 @@
+# Containers, tabs, radio, dropdown — runs headlessly via synthetic clicks
+import gui
+fn on_any(ev) {
+  gui.set_text(w, status, "event: " + ev["type"] + " on " + str(ev["id"]))
+}
+let w = gui.window("C4Plus layout", 640, 480)
+gui.theme(w, "midnight")
+let status = gui.label(w, "ready", 12, 10, 600, 22)
+
+let side = gui.vbox(w, 12, 44, 200, 0, 8)
+gui.begin(w, side)
+let b1 = gui.button(w, "A", on_any)
+let b2 = gui.button(w, "B", on_any)
+let c1 = gui.checkbox(w, "flag")
+gui.end()
+
+let row = gui.hbox(w, 230, 44, 0, 0, 8)
+gui.begin(w, row)
+let ra = gui.radio(w, "g", "X")
+let rb = gui.radio(w, "g", "Y")
+gui.end()
+gui.radio_group(w, "g", 1)
+
+let tabs = gui.tabs(w, 230, 100, 380, 220)
+gui.tab_add(w, tabs, "One")
+gui.tab_add(w, tabs, "Two")
+gui.begin(w, tabs)
+gui.tab_select(w, tabs, 1)
+let dd = gui.dropdown(w, "menu")
+gui.list_add(w, dd, "red")
+gui.list_add(w, dd, "green")
+gui.end()
+
+gui.tick(w, 30)
+let n = 0
+while gui.alive(w) {
+  let ev = gui.wait(w)
+  if ev == nil {
+    break
+  }
+  if ev["type"] == "tick" {
+    n = n + 1
+    if n == 3 {
+      gui.click(w, 30, 80)
+    }
+    if n == 5 {
+      print ("button click -> " + gui.get_text(w, status))
+      gui.click(w, 245, 60)
+    }
+    if n == 7 {
+      print ("radio click -> X=" + str(gui.get(w, ra)) + " Y=" + str(gui.get(w, rb)))
+      gui.click(w, 260, 112)
+    }
+    if n == 8 {
+      print ("tick8 status = " + gui.get_text(w, status) + " tab=" + str(gui.get(w, tabs)))
+    }
+    if n == 9 {
+      print ("active tab = " + str(gui.get(w, tabs)))
+      gui.click(w, 400, 110)
+    }
+    if n == 11 {
+      print ("tab click -> active tab = " + str(gui.get(w, tabs)))
+      print ("dropdown sel = " + str(gui.get(w, dd)))
+      gui.post_close(w)
+    }
+    if n > 40 {
+      gui.quit(w)
+    }
+  }
+}
+print "layout example done"

@@ -1,0 +1,10 @@
+# LL10 — bitfield pack a page-entry-like word
+let present = 1
+let rw = 1
+let frame = 2748
+let entry = present + rw * 2 + frame * 4096
+print entry
+print bits(entry, 0, 0)
+print bits(entry, 1, 1)
+print bits(entry, 31, 12)
+print setbits(0, 31, 12, frame)

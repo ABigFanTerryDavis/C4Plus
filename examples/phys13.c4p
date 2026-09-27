@@ -1,0 +1,8 @@
+import physics
+print physics.g()
+print physics.fall(20)
+print physics.range(10, 45)
+print physics.height(10, 45)
+print physics.dist(0, 0, 3, 4)
+print physics.speed(100, 9.58)
+print physics.energy(70, 10)

@@ -1,0 +1,7 @@
+# 38_nativedemo — COMPILE ONLY (native asm can't run interpreted):
+#   c4c --emit-c 38_nativedemo.c4p -o nat.c
+#   gcc -std=c99 -I rt -o nat nat.c rt/c4rt.c -lm
+import "templates/native38.c4asm"
+print "loaded"
+native38()
+print "back"

@@ -1,0 +1,6 @@
+# Zig / build outputs
+.zig-cache/
+zig-out/
+
+# Local release snapshots (kept locally; public releases go via GitHub releases)
+zip/

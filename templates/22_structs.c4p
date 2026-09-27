@@ -1,0 +1,16 @@
+# 22_structs — record types with fields
+struct Point {
+  x
+  y
+}
+let p = Point(3, 4)
+print p.x
+print p.y
+p.x = 10
+print p
+print (p == Point(10, 4))
+print type(p)
+struct User { name, age }
+let u = User("Ada", 36)
+print u.name
+print u

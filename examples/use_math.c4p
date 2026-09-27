@@ -1,0 +1,4 @@
+import "examples/math01.c4h"
+import "examples/math01.c4h"
+print square(5)
+print PI

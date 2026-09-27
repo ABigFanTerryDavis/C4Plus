@@ -1,0 +1,7 @@
+# 02_variables — let, reassign, concat (no types, no semicolons)
+let name = "C4Plus"
+print name
+name = "C4Plus 0.0.7"
+print name
+let lang = "C"
+pt (lang + "4Plus")

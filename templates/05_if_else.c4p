@@ -1,0 +1,12 @@
+# 05_if_else — basic branching
+let n = 7
+if n > 10 {
+  print "big"
+} else {
+  print "small"
+}
+if n % 2 == 0 {
+  print "even"
+} else {
+  print "odd"
+}

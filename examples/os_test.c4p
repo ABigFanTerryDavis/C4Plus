@@ -1,0 +1,3 @@
+import os
+os.create("zig-out/os_test.txt", "hello C4Plus")
+print os.read("zig-out/os_test.txt")

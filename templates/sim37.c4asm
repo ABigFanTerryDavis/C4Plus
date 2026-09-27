@@ -1,0 +1,12 @@
+# 37_simasm — .c4asm for the sim CPU + cpu.run driver (see 37_prog.c4p)
+#target sim
+.entry main
+main:
+  li r0, 5
+  li r1, 1
+loop:
+  sub r0, r1
+  jz r0, done
+  jmp loop
+done:
+  halt

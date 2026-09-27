@@ -1,0 +1,11 @@
+# LL5 — sim CPU stepping by hand
+import cpu
+let m = cpu.new(32)
+cpu.step(m, "li", 0, 7)
+cpu.step(m, "li", 1, 6)
+cpu.step(m, "add", 0, 1)
+print cpu.reg(m, 0)
+cpu.step(m, "sw", 0, 8)
+cpu.step(m, "li", 0, 0)
+cpu.step(m, "lw", 0, 8)
+print cpu.reg(m, 0)

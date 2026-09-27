@@ -1,0 +1,12 @@
+# 40_heap2 — calloc/realloc/dump + trig
+import heap
+let h = heap.new(64)
+let a = heap.calloc(h, 8)
+let b = heap.malloc(h, 8)
+print heap.dump(h)
+let c = heap.realloc(h, a, 16)
+print c
+print heap.dump(h)
+print sin(pi() / 2)
+print log(e())
+print deg(pi())

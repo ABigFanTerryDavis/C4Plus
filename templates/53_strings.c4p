@@ -1,0 +1,20 @@
+# String helpers
+import strings
+
+let name = "  C4Plus-demo  "
+print ("[" + strings.pad_left(name, 20) + "]")
+print ("[" + strings.pad_right("hi", 6, ".") + "]")
+print strings.starts_with("boot.s", "boot")
+print strings.ends_with("boot.s", ".s")
+print strings.find("one two one", "one")
+print strings.find("abc", "z")
+print strings.repeat("=+", 6)
+print strings.replace_all("a-b-c", "-", "_")
+
+let cfg = "name=C4Plus\nversion=0.3.3\nmode=script"
+for line in strings.lines(cfg) {
+  if strings.find(line, "=") >= 0 {
+    let k = split(line, "=")
+    print (strings.pad_right(k[0], 8) + " -> " + k[1])
+  }
+}

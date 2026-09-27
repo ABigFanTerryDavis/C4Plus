@@ -1,0 +1,14 @@
+# 19_guess_game — needs stdin (answer 7)
+let secret = 7
+let won = 0
+while won == 0 {
+  let g = int(input("guess: "))
+  if g == secret {
+    print "correct"
+    won = 1
+  } elif g < secret {
+    print "higher"
+  } else {
+    print "lower"
+  }
+}

@@ -1,0 +1,9 @@
+# LL4 — heap playground
+import heap
+let h = heap.new(48)
+let a = heap.malloc(h, 10)
+let b = heap.malloc(h, 10)
+print heap.stats(h)
+heap.free(h, a)
+print heap.stats(h)
+print heap.dump(h)

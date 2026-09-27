@@ -1,0 +1,9 @@
+# 11_push_concat — grow and combine lists
+let xs = [1, 2]
+push(xs, 3)
+print xs
+xs = xs + [4, 5]
+print xs
+xs[0] = 99
+print xs
+print len(xs)

@@ -1,0 +1,14 @@
+# Word frequency with dicts
+let words = ["a", "b", "a", "c", "b", "a"]
+let freq = {}
+for w in words {
+  if contains(freq, w) {
+    freq[w] = freq[w] + 1
+  } else {
+    freq[w] = 1
+  }
+}
+for w in ["a", "b", "c"] {
+  print (w + "=" + str(freq[w]))
+}
+print (len(freq) == 3)

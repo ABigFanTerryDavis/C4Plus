@@ -1,0 +1,43 @@
+# 55_paging — paging + kernel heap in a freestanding C4Plus kernel.
+# Build (needs irq.o linked):
+#   c4c --emit-c 55_paging.c4p --freestanding -o pg.c
+#   gcc -m32 -ffreestanding -nostdlib -c -o pg.o pg.c -I rt
+#   gcc -m32 -ffreestanding -nostdlib -c -o fs.o rt/c4rt_fs.c
+#   as --32 rt/irq.s -o irq.o
+#   as --32 boot/boot.s -o boot.o
+#   ld -m i386pe -T boot/linkflat.ld -o pg.pe pg.o fs.o irq.o
+#   objcopy -O binary pg.pe pg.bin
+#   ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
+#   objcopy -O binary -j .boot boot.pe boot.bin
+#   cat boot.bin pg.bin > pdisk.img   (pad kernel area to 32K)
+#   qemu-system-i386 -drive format=raw,file=pdisk.img -display none ^
+#     -debugcon file:zig-out/p.log -device isa-debug-exit,iobase=0xf4,iosize=0x04
+# Expect: paging on, heap reuse shown, qemu exit = (code<<1)|1.
+
+# page directory at 0x80000, one page table at 0x81000: identity 0-4MB
+poke32(524288, 528387)
+let i = 0
+while i < 1024 {
+  poke32(528384 + i * 4, i * 4096 + 3)
+  i = i + 1
+}
+cr3(524288)
+pg_on()
+print "paging on"
+
+# the heap: alloc, write, read back, free, realloc (same addr = reuse)
+let a = kmalloc(64)
+poke32(a, 3735928559)
+poke32(a + 4, 1)
+print peek32(a)
+print peek32(a + 4)
+let b = kmalloc(32)
+print ("b=" + str(b))
+kfree(a)
+kfree(b)
+let c = kmalloc(64)
+print ("reuse=" + str(c == a))
+poke32(c, 42)
+print peek32(c)
+print "heap ok"
+exit(0)

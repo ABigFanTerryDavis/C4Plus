@@ -1,0 +1,38 @@
+# 43_gdt — build GDT/IDT descriptors with pack/unpack (for OS work)
+# A GDT entry is 8 bytes: limit_low, base_low, base_mid, access,
+# granularity, base_high. An IDT gate is 8 bytes: offset_low, selector,
+# zero, type_attr, offset_high.
+
+fn gdt_entry(base, limit, access, gran) {
+  let lo = pack("<HHBB", [int(limit % 65536), int(base % 65536), int(base / 65536) % 256, access])
+  let hi = pack("<BB", [gran, int(base / 16777216) % 256])
+  return lo + hi
+}
+
+fn idt_gate(offset, selector, attr) {
+  return pack("<HBBHH", [int(offset % 65536), selector, 0, attr, int(offset / 65536) % 65536])
+}
+
+# null descriptor
+let null = gdt_entry(0, 0, 0, 0)
+print null
+print ("null size = " + str(len(null)))
+
+# 32-bit code segment: base 0, limit 4G, access 0x9A, gran 0xCF
+let code = gdt_entry(0, 4294967295, 154, 207)
+print code
+print ("code access = " + str(code[5]))
+print ("code gran = " + str(code[6]))
+
+# 32-bit data segment: access 0x92
+let data = gdt_entry(0, 4294967295, 146, 207)
+print data
+
+# round trip: unpack the low 6 bytes we packed
+let back = unpack("<HHBB", [code[0], code[1], code[2], code[3], code[4], code[5]])
+print back
+
+# interrupt gate for vector 32 (timer): offset 0x10000, selector 0x08, attr 0x8E
+let gate = idt_gate(65536, 8, 142)
+print gate
+print ("gate len = " + str(sizeof("<HBBHH")))

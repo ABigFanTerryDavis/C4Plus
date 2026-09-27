@@ -1,0 +1,12 @@
+# 33_heapbits — allocator + bitfields
+import heap
+let h = heap.new(32)
+let a = heap.malloc(h, 8)
+let b = heap.malloc(h, 8)
+print heap.stats(h)
+heap.free(h, a)
+heap.free(h, b)
+print heap.stats(h)
+print bits(255, 3, 0)
+print setbits(0, 15, 8, 171)
+print flag(255, 7)

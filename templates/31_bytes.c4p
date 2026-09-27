@@ -1,0 +1,9 @@
+# 31_bytes — byte buffers + binary files
+let mem = bytes(8)
+poke(mem, 0, 72)
+poke(mem, 1, 105)
+print peek(mem, 0)
+print len(mem)
+import os
+os.writebytes("zig-out/t31.bin", mem)
+print os.readbytes("zig-out/t31.bin")

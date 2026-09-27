@@ -1,0 +1,16 @@
+# 15_calculator — op dispatch function
+fn calc(a, op, b) {
+  if op == "+" {
+    return a + b
+  }
+  if op == "-" {
+    return a - b
+  }
+  if op == "*" {
+    return a * b
+  }
+  return a / b
+}
+print calc(6, "*", 7)
+print calc(20, "/", 4)
+print calc(2 + 3, "+", 10)

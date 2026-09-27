@@ -1,0 +1,13 @@
+# Bubble sort
+let xs = [5, 3, 8, 1, 9, 2]
+let n = len(xs)
+for i in 0..n {
+  for j in 0..(n - 2) {
+    if xs[j] > xs[j + 1] {
+      let t = xs[j]
+      xs[j] = xs[j + 1]
+      xs[j + 1] = t
+    }
+  }
+}
+print xs

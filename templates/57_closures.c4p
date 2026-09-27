@@ -1,0 +1,35 @@
+# Closures: functions remember where they were born
+# Each call to counter() gets its OWN private n.
+fn counter() {
+  let n = 0
+  fn inc() {
+    n = n + 1
+    return n
+  }
+  return inc
+}
+let a = counter()
+let b = counter()
+print a()
+print a()
+print b()
+
+# Parameters are captured too.
+fn adder(x) {
+  fn add(y) {
+    return x + y
+  }
+  return add
+}
+let add5 = adder(5)
+print add5(10)
+print add5(20)
+
+# Plain outer variables are shared (no dict needed anymore).
+let total = 0
+fn bump() {
+  total = total + 10
+}
+bump()
+bump()
+print total

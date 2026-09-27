@@ -1,0 +1,34 @@
+# 56_syscall — int 0x80 syscalls from a freestanding C4Plus kernel.
+# Build (needs irq.o linked):
+#   c4c --emit-c 56_syscall.c4p --freestanding -o sys.c
+#   gcc -m32 -ffreestanding -nostdlib -c -o sys.o sys.c -I rt
+#   gcc -m32 -ffreestanding -nostdlib -c -o fs.o rt/c4rt_fs.c
+#   as --32 rt/irq.s -o irq.o
+#   as --32 boot/boot.s -o boot.o
+#   ld -m i386pe -T boot/linkflat.ld -o sys.pe sys.o fs.o irq.o
+#   objcopy -O binary sys.pe sys.bin
+#   ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
+#   objcopy -O binary -j .boot boot.pe boot.bin
+#   cat boot.bin sys.bin > sdisk.img   (pad kernel area to 32K)
+#   qemu-system-i386 -drive format=raw,file=sdisk.img -display none ^
+#     -debugcon file:zig-out/s.log -device isa-debug-exit,iobase=0xf4,iosize=0x04
+# Syscalls: 1 = write(addr, len), 2 = exit(code), 3 = ticks.
+# Expect the message, the tick count, then qemu exit = (code<<1)|1.
+
+# IDT gate 0x80 -> syscall stub (trap gate, DPL 0)
+idt_set(128, syscall_addr(), 8, 142)
+idt_load()
+
+let msg = "hello from syscall 1"
+syscall(1, addr(msg), 19, 0)
+
+let t0 = syscall(3, 0, 0, 0)
+let spin = 0
+while spin < 2000000 {
+  spin = spin + 1
+}
+let t1 = syscall(3, 0, 0, 0)
+print ("ticks during spin=" + str(t1 - t0))
+
+syscall(1, addr("bye"), 3, 0)
+syscall(2, 7, 0, 0)

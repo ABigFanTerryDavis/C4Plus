@@ -1,0 +1,38 @@
+# Dice, lotto and password generator
+import random
+
+fn roll(n, sides) {
+  let total = 0
+  for i in 1..n {
+    total = total + random.int(1, sides)
+  }
+  return total
+}
+
+random.seed(2024)
+print ("2d6 = " + str(roll(2, 6)) + " (4..12)")
+print ("1d20 = " + str(roll(1, 20)))
+
+let numbers = []
+while len(numbers) < 6 {
+  let n = random.int(1, 49)
+  if contains(numbers, n) == 0 {
+    push(numbers, n)
+  }
+}
+print ("lotto: " + str(sort(numbers)))
+
+let alphabet = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+let pw = ""
+for i in 1..16 {
+  pw = pw + random.pick(alphabet)
+}
+print ("password: " + pw)
+
+let deck = []
+for i in 1..52 {
+  push(deck, "card" + str(i))
+}
+let dealt = random.shuffle(deck)
+print ("first five cards: " + str(dealt[0]) + ", " + str(dealt[1]) + ", " + str(dealt[2]))
+print ("deck size still " + str(len(deck)) + ", dealt " + str(len(dealt)))

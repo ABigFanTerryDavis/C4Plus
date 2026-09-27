@@ -1,0 +1,14 @@
+# shell_fs — kernel-side shell demo (no input(): canned lines via run_cmd)
+# Check:   c4c check examples/shell_fs.c4p
+# Emit:    c4c --emit-c examples/shell_fs.c4p --freestanding -o shell_k.c
+# Compile: gcc -m32 -ffreestanding -nostdlib -c -o shell_k.o shell_k.c -I rt
+# NOTE: never `c4c run` this file — the x86-64 .c4asm import needs --emit-c.
+import "examples/shell_core.c4h"
+import "examples/shell_io.c4asm"
+shell_io()
+print run_cmd("version")
+print run_cmd("echo hello kernel")
+print run_cmd("add 40 2")
+print run_cmd("bogus")
+print "kmain alive"
+exit(0)

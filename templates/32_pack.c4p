@@ -1,0 +1,10 @@
+# 32_pack — binary descriptors: GDT-style entry + round trip
+let entry = pack("<BBHI", [255, 0, 65535, 190])
+print entry
+print sizeof("<BBHI")
+print unpack("<BBHI", entry)
+import os
+os.writebytes("zig-out/t32.bin", entry)
+print os.readbytes("zig-out/t32.bin")
+print u8(300)
+print i16(40000)

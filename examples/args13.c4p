@@ -1,0 +1,8 @@
+let who = "world"
+if len(args()) > 0 {
+  who = args()[0]
+}
+print ("hi " + who)
+print len(args())
+exit(0)
+print "never"

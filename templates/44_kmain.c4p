@@ -1,0 +1,17 @@
+# 44_kmain — freestanding kernel demo (boots in QEMU):
+#   c4c --emit-c 44_kmain.c4p --freestanding -o kernel.c
+#   gcc -m32 -ffreestanding -nostdlib -c -o kernel.o kernel.c -I rt
+#   gcc -m32 -ffreestanding -nostdlib -c -o fs.o rt/c4rt_fs.c
+#   as --32 boot/boot.s -o boot.o
+#   ld -m i386pe -T boot/linkflat.ld -o kernel.pe kernel.o fs.o
+#   objcopy -O binary kernel.pe kernel.bin
+#   ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
+#   objcopy -O binary -j .boot boot.pe boot.bin
+#   cat boot.bin kernel.bin > disk.img   (pad kernel area to 32K)
+#   qemu-system-i386 -drive format=raw,file=disk.img -display none ^
+#     -debugcon file:zig-out/k.log -device isa-debug-exit,iobase=0xf4,iosize=0x04
+# watch zig-out/k.log for ABD + prints; qemu exit = (exit_code << 1) | 1.
+let x = 6 * 7
+print x
+print "kmain alive"
+exit(42)

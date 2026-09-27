@@ -1,0 +1,11 @@
+# 20_mini_todo — tiny list app
+let todos = []
+push(todos, "write code")
+push(todos, "test it")
+push(todos, "ship it")
+print ("you have " + str(len(todos)) + " todos:")
+for t in todos {
+  print ("- " + t)
+}
+todos[0] = "write more code"
+print todos

@@ -1,0 +1,9 @@
+import os
+print os.exists("zig-out/os9.txt")
+os.create("zig-out/os9.txt", "one")
+os.append("zig-out/os9.txt", " two")
+print os.read("zig-out/os9.txt")
+os.edit("zig-out/os9.txt", "two", "2")
+print os.read("zig-out/os9.txt")
+os.remove("zig-out/os9.txt")
+print os.exists("zig-out/os9.txt")

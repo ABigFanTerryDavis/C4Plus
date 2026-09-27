@@ -1,0 +1,14 @@
+# Run other programs from C4Plus
+import os
+
+let r = os.exec("echo hello-from-exec")
+print ("code=" + str(r["code"]))
+print ("out=" + r["out"])
+print ("timeout=" + str(r["timeout"]))
+
+let r2 = os.exec(["cmd", "/C", "echo argv-form"])
+print ("argv out=" + r2["out"])
+
+let r3 = os.exec("exit 7")
+print ("exit code=" + str(r3["code"]))
+print ("fast timeout flag=" + str(os.exec("echo quick", 5000)["timeout"]))

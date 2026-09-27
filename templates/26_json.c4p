@@ -1,0 +1,8 @@
+# 26_json — import json, parse + stringify
+import json
+let cfg = json.parse("{\"host\": \"x\", \"ports\": [80, 443]}")
+print cfg["host"]
+print cfg["ports"][1]
+print json.stringify(cfg)
+let nums = json.parse("[1, 2, 3]")
+print len(nums)

@@ -1,0 +1,22 @@
+fn on_click(n) { return n * 2 }
+fn apply(f, x) { return f(x) }
+fn rec(n) {
+  if n == 0 {
+    return 0
+  }
+  return 1 + rec(n - 1)
+}
+let cb = on_click
+print cb
+print cb(10)
+print apply(on_click, 10)
+print call(cb, 5)
+print type(cb)
+print fname(cb)
+print (cb == on_click)
+let handlers = [on_click]
+print handlers[0](7)
+let d = {"click": on_click}
+print d["click"](3)
+print rec(500)
+print rec(900)

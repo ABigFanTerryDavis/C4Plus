@@ -1,0 +1,7 @@
+import json
+let m = json.parse("{\"a\": 1, \"b\": [1, 2]}")
+print m["a"]
+print json.stringify(m)
+print json.parse("[1, true, null]")
+print json.parse("{\"e\": \"x\\n\\u0041\"}")
+print json.stringify({"x": nil})

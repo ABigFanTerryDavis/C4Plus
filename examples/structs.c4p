@@ -1,0 +1,10 @@
+struct Point {
+  x
+  y
+}
+let p = Point(3, 4)
+print p.x
+p.x = 10
+print p
+print (p == Point(10, 4))
+print type(p)

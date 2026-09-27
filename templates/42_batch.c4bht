@@ -1,0 +1,4 @@
+#c4bht title="Batch Demo" pause
+# 42_batch — double-click me after `c4c assoc` (or run: c4c run 42_batch.c4bht)
+print "batch hi"
+print (40 + 2)

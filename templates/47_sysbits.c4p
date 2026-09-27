@@ -1,0 +1,25 @@
+# Systems helpers: hex, crc32, time
+import hex
+import time
+
+print hex.encode("C4Plus")
+print hex.dump([72, 105, 0, 255])
+print hex.decode("48 69 00 ff")
+print hex.encode(hex.decode("dead beef"))
+print hex.word(305419896)
+print hex.parse("0xDEADBEEF")
+print hex.parse("ff")
+
+print ("crc32 check = " + hex.word(crc32("123456789")))
+print ("crc32 empty = " + hex.word(crc32("")))
+print ("crc32 bytes = " + hex.word(crc32([1, 2, 3])))
+
+let t0 = time.ms()
+let sum = 0
+for i in 1..200000 {
+  sum = sum + i
+}
+print ("sum=" + str(sum) + " ok=" + str(sum == 20000100000))
+print ("ms advanced=" + str(time.ms() - t0 >= 0))
+print ("clock in range=" + str(time.clock() >= 0 and time.clock() < 86400))
+print ("epoch_ms>0 = " + str(time.epoch_ms() > 1700000000000))

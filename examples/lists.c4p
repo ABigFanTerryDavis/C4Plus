@@ -1,0 +1,15 @@
+let xs = [1, 2, 3]
+print xs[0]
+print len(xs)
+
+for x in xs {
+  print x
+}
+
+xs = xs + [4]
+push(xs, 5)
+print len(xs)
+print xs
+xs[0] = 99
+print xs[0]
+print xs[-1]

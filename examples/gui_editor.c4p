@@ -1,0 +1,47 @@
+# Multiline code editor widget — runs headlessly via synthetic input
+import gui
+fn on_edit(ev) {
+  gui.set_text(w, status, "lines=" + str(gui.line_count(w, ed)))
+}
+let w = gui.window("C4Plus editor", 600, 440)
+gui.theme(w, "midnight")
+gui.font(w, 14)
+let status = gui.label(w, "ready", 16, 12, 560, 22)
+let ed = gui.editbox(w, "fn main() {\n  print \"hi\"\n}", 16, 44, 480, 220)
+gui.on(w, ed, on_edit)
+print ("lines=" + str(gui.line_count(w, ed)))
+print ("line1=" + gui.get_line(w, ed, 1))
+gui.tick(w, 30)
+let n = 0
+while gui.alive(w) {
+  let ev = gui.wait(w)
+  if ev == nil {
+    break
+  }
+  if ev["type"] == "tick" {
+    n = n + 1
+    if n == 3 {
+      gui.click(w, 200, 90)
+      gui.type_text(w, "X")
+      gui.key_press(w, "enter")
+      gui.type_text(w, "  // new")
+    }
+    if n == 6 {
+      print ("after edit lines=" + str(gui.line_count(w, ed)))
+      gui.goto_line(w, ed, 0)
+      gui.key_press(w, "down")
+      gui.key_press(w, "down")
+      gui.key_press(w, "end")
+      gui.type_text(w, "!")
+    }
+    if n == 9 {
+      print ("final text:")
+      print gui.get_text(w, ed)
+      gui.post_close(w)
+    }
+    if n > 40 {
+      gui.quit(w)
+    }
+  }
+}
+print "editor example done"

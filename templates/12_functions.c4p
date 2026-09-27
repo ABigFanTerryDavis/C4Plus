@@ -1,0 +1,10 @@
+# 12_functions — define and call
+fn add(a, b) {
+  return a + b
+}
+fn greet(name) {
+  return "hi " + name
+}
+print add(2, 3)
+print greet("C4Plus")
+print add(add(1, 2), 10)

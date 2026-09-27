@@ -1,0 +1,26 @@
+try {
+  print "before"
+  fail("boom")
+  print "after"
+} catch e {
+  print ("caught: " + e)
+}
+try {
+  let m = {"a": 1}
+  print m["zz"]
+} catch e {
+  print ("caught2: " + e)
+}
+print "alive"
+for k, v in {"a": 1, "b": 2} {
+  print (k + "=" + str(v))
+}
+for ch in "hey" {
+  print ch
+}
+for i, x in ["a", "b"] {
+  print (str(i) + ":" + x)
+}
+for i, ch in "ab" {
+  print (str(i) + "=" + ch)
+}

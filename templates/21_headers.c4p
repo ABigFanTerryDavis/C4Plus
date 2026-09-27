@@ -1,0 +1,6 @@
+# 21_headers — import reusable .c4h headers
+import "templates/21_math.c4h"
+print square(5)
+print cube(3)
+print PI
+print (2 * PI * 10)

@@ -1,0 +1,9 @@
+# LL8 — struct + manual field offsets (C layout thinking)
+struct Regs {
+  eax
+  ebx
+}
+let r = Regs(1, 2)
+print r.eax
+print sizeof("II")
+print unpack("<I", pack("<I", [305419896]))

@@ -1,0 +1,88 @@
+# C4Plus 0.3.0 GUI: containers, tabs, radio, dropdown, pictures, shapes
+# run:  c4c run templates/49_gui30.c4p
+import gui
+
+let app = {"tab": 0, "n": 0}
+
+fn on_any(ev) {
+  gui.set_text(w, status, "event: " + ev["type"] + " on " + str(ev["id"]))
+}
+fn on_pick(ev) {
+  app["n"] = app["n"] + 1
+  gui.set_text(w, status, "picked " + str(app["n"]) + " item(s)")
+}
+
+let w = gui.window("C4Plus 0.3.0 GUI", 840, 620)
+gui.theme(w, "midnight")
+gui.font(w, 14)
+
+let status = gui.label(w, "ready", 16, 12, 700, 22)
+
+let side = gui.vbox(w, 16, 48, 220, 0, 10)
+gui.begin(w, side)
+let b1 = gui.button(w, "Click me", on_any)
+let cb = gui.checkbox(w, "check me")
+let sl = gui.slider(w, 0, 100, 30)
+let bar = gui.progress(w, 60)
+let tb = gui.textbox(w, "text here")
+gui.end()
+
+let row = gui.hbox(w, 260, 48, 0, 0, 10)
+gui.begin(w, row)
+let r1 = gui.radio(w, "mode", "Fast")
+let r2 = gui.radio(w, "mode", "Balanced")
+let r3 = gui.radio(w, "mode", "Safe")
+gui.end()
+gui.radio_group(w, "mode", 1)
+
+let tabs = gui.tabs(w, 260, 100, 300, 220)
+gui.tab_add(w, tabs, "Shapes")
+gui.tab_add(w, tabs, "Lists")
+let page1 = gui.label(w, "shapes below use alpha", 280, 130, 260, 22)
+gui.begin(w, tabs)
+gui.tab_select(w, tabs, 1)
+let items = gui.list(w, "", 280, 150, 240, 150)
+gui.list_add(w, items, "alpha")
+gui.list_add(w, items, "beta")
+gui.list_add(w, items, "gamma")
+gui.end()
+
+let opts = gui.groupbox(w, "Options", 590, 100, 230, 220)
+gui.begin(w, opts)
+let dd = gui.dropdown(w, "pick one")
+gui.list_add(w, dd, "one")
+gui.list_add(w, dd, "two")
+gui.list_add(w, dd, "three")
+gui.on(w, dd, on_pick)
+let b2 = gui.button(w, "Apply", on_any)
+gui.end()
+
+let img = gui.picture(w, "zig-out/testimg.png", 590, 340, 128, 128)
+
+let frame = 0
+let spin = 0
+gui.tick(w, 33)
+while gui.alive(w) {
+  let ev = gui.wait(w)
+  if ev == nil {
+    break
+  }
+  if ev["type"] == "tick" {
+    frame = frame + 1
+    spin = spin + 5
+    if spin > 360 {
+      spin = 0
+    }
+    gui.gradient(w, 16, 300, 220, 180, gui.color("navy"), gui.color("purple"), 1)
+    gui.disc(w, 90, 380, 30, gui.fade(gui.color("cyan"), 130))
+    gui.circle(w, 160, 380, 40, gui.color("white"))
+    gui.arc(w, 160, 380, 52, spin, 140, gui.fade(gui.color("yellow"), 190), 7)
+    gui.polygon(w, [60, 430, 110, 430, 85, 380], gui.fade(gui.color("coral"), 160))
+    gui.text(w, 30, 440, "alpha shapes + gradient", gui.color("white"))
+    if frame > 60 {
+      print ("frames drawn: " + str(frame))
+      gui.post_close(w)
+    }
+  }
+}
+print "0.3.0 demo closed"

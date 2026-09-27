@@ -1,0 +1,12 @@
+let m = {"name": "Ada", "age": 36}
+print m["name"]
+m["lang"] = "C4Plus"
+print len(m)
+print keys(m)
+print m
+print del(m, "age")
+print m
+print contains(m, "name")
+print (m == {"name": "Ada", "lang": "C4Plus"})
+let n = {x: 1}
+print n["x"]

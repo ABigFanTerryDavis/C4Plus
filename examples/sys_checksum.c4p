@@ -1,0 +1,37 @@
+# File checksum tool:  c4c run examples/sys_checksum.c4p <file> [expected_crc32]
+import os
+import hex
+import time
+
+let argv = args()
+if len(argv) < 1 {
+  print "usage: c4c run examples/sys_checksum.c4p <file> [expected_crc32]"
+  exit(2)
+}
+let path = argv[0]
+if os.exists(path) == 0 {
+  print ("missing file: " + path)
+  exit(1)
+}
+let t0 = time.ms()
+let data = os.readbytes(path)
+let sum = crc32(data)
+let head = []
+let i = 0
+while i < 16 and i < len(data) {
+  push(head, data[i])
+  i = i + 1
+}
+print (path + "  " + str(len(data)) + " bytes")
+print ("crc32 = " + hex.word(sum))
+print ("first bytes: " + hex.dump(head))
+print ("hashed in " + str(time.ms() - t0) + "ms")
+if len(argv) > 1 {
+  let want = hex.parse(argv[1])
+  if want == sum {
+    print "OK checksum matches"
+    exit(0)
+  }
+  print ("BAD checksum (expected " + hex.word(want) + ")")
+  exit(1)
+}

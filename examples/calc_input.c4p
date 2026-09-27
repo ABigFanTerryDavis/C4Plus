@@ -1,0 +1,16 @@
+let a = int(input("a: "))
+let op = input("op: ")
+let b = int(input("b: "))
+fn calc(x, o, y) {
+  if o == "+" {
+    return x + y
+  }
+  if o == "-" {
+    return x - y
+  }
+  if o == "*" {
+    return x * y
+  }
+  return x / y
+}
+print calc(a, op, b)

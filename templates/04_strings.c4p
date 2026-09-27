@@ -1,0 +1,6 @@
+# 04_strings — concat + escapes
+let first = "Ada"
+let last = "Lovelace"
+print (first + " " + last)
+print "tab\there"
+print ("count: " + (40 + 2))

@@ -1,0 +1,29 @@
+# Callbacks and function values (interpreter-only feature)
+fn on_click(n) {
+  return n * 2
+}
+fn apply(f, x) {
+  return f(x)
+}
+fn each(list, f) {
+  for v in list {
+    print call(f, v)
+  }
+}
+let cb = on_click
+print cb
+print cb(10)
+print apply(on_click, 10)
+print call(cb, 5)
+print type(cb)
+print fname(cb)
+each([1, 2, 3], on_click)
+let handlers = {"click": on_click}
+print handlers["click"](4)
+fn rec(n) {
+  if n == 0 {
+    return 0
+  }
+  return 1 + rec(n - 1)
+}
+print rec(500)

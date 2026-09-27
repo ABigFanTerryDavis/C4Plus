@@ -1,0 +1,92 @@
+# 59_sched — preemptive multitasking: two ring-3 tasks ping-pong
+# numbers through mailbox syscalls while the PIT preempts at 100Hz.
+# Build:
+#   as --32 user/pong.s -o zig-out/pong.o
+#   objcopy -O binary zig-out/pong.o zig-out/pong.bin
+#   python user/mkelf.py zig-out/pong.bin zig-out/user2.elf 0x400000
+#   objcopy -I binary -O elf32-i386 -B i386 zig-out/user2.elf zig-out/user2_data.o
+#   gcc -m32 -ffreestanding -nostdlib -c -o zig-out/userblob.o rt/userblob.c -I rt
+#   c4c --emit-c 59_sched.c4p --freestanding -o sc.c
+#   gcc -m32 -ffreestanding -nostdlib -c -o sc.o sc.c -I rt
+#   gcc -m32 -ffreestanding -nostdlib -c -o fs.o rt/c4rt_fs.c
+#   as --32 rt/irq.s -o irq.o
+#   as --32 boot/boot.s -o boot.o
+#   ld -m i386pe -T boot/linkflat.ld -o sc.pe sc.o fs.o irq.o zig-out/user2_data.o zig-out/userblob.o
+#   objcopy -O binary sc.pe sc.bin
+#   ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
+#   objcopy -O binary -j .boot boot.pe boot.bin
+#   cat boot.bin sc.bin > sdisk.img   (pad kernel area to 48K)
+#   qemu-system-i386 -drive format=raw,file=sdisk.img -display none ^
+#     -debugcon file:zig-out/s.log -device isa-debug-exit,iobase=0xf4,iosize=0x04
+# Expect five "got N" lines, then qemu exit = (code<<1)|1.
+
+# full GDT + TSS
+gdt_set(1, 0, 4294967295, 154, 207)
+gdt_set(2, 0, 4294967295, 146, 207)
+gdt_set(3, 0, 4294967295, 250, 207)
+gdt_set(4, 0, 4294967295, 242, 207)
+gdt_load()
+tss(589824)
+
+# paging: PD[0] 0-4MB (supervisor below 4MB), PD[1] 4-8MB user,
+# PD[2] 8-12MB user (task stacks live here).
+poke32(524288, 528387)
+poke32(524292, 532487)
+poke32(524296, 536583)
+let i = 0
+while i < 1024 {
+  poke32(528384 + i * 4, i * 4096 + 3)
+  i = i + 1
+}
+let j = 0
+while j < 1024 {
+  poke32(532480 + j * 4, 4194304 + j * 4096 + 7)
+  poke32(536576 + j * 4, 8388608 + j * 4096 + 7)
+  j = j + 1
+}
+cr3(524288)
+pg_on()
+print "sched paging on"
+
+# PIC: timer only; PIT 100Hz for preemption slices
+outb(32, 17)
+outb(160, 17)
+outb(33, 32)
+outb(161, 40)
+outb(33, 4)
+outb(161, 2)
+outb(33, 1)
+outb(161, 1)
+outb(33, 254)
+outb(161, 255)
+outb(67, 52)
+outb(64, 155)
+outb(64, 46)
+
+# IDT: timer, syscall (DPL3), fault traps
+idt_set(32, irq_addr(), 8, 142)
+idt_set(128, syscall_addr(), 8, 238)
+let v = 0
+while v < 32 {
+  idt_set(v, fault_addr(v), 8, 142)
+  v = v + 1
+}
+idt_load()
+
+# two tasks from the same ELF, stacks 256KB apart
+let base = user2_base()
+print ("user base=" + str(base))
+let e = elf_load(base)
+print ("entry=" + str(e))
+let t1 = task_create(e, 8388608)
+let t2 = task_create(e, 8126464)
+print ("tasks=" + str(t1) + "," + str(t2))
+sti()
+print "sched on"
+
+# idle: wait for both tasks to exit, then leave
+while tasks() > 0 {
+  idle()
+}
+print "all tasks done"
+exit(0)

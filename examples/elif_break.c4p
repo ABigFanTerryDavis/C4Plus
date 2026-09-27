@@ -1,0 +1,33 @@
+let x = 5
+if x < 0 {
+  print "neg"
+} elif x == 0 {
+  print "zero"
+} elif x < 10 {
+  print "small"
+} else {
+  print "big"
+}
+
+let i = 0
+while true {
+  if i >= 3 {
+    break
+  }
+  i = i + 1
+  if i == 2 {
+    continue
+  }
+  print i
+}
+
+for n in [10, 20, 30, 40] {
+  if n == 30 {
+    continue
+  }
+  if n == 40 {
+    break
+  }
+  print n
+}
+print "end"

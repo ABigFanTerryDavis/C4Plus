@@ -1,0 +1,22 @@
+# 41_bootimg — multiboot header + GDT entries as a real boot blob
+# (kernel prep: describe hardware tables, serialize with pack, verify)
+import os
+
+# multiboot1 header: magic, flags, checksum (-(magic+flags) as u32)
+let magic = 464367618
+let flags = 3
+let check = u32(0 - magic - flags)
+let hdr = pack("<III", [magic, flags, check])
+print hdr
+print (hdr[0] + hdr[1] * 256 + hdr[2] * 65536 + hdr[3] * 16777216)
+
+# GDT code segment descriptor: limit 0xFFFFF, base 0, access 0x9A, gran 0xCF
+let gdt_code = pack("<BBHBB", [255, 255, 0, 154, 207])
+print gdt_code
+print len(gdt_code)
+
+os.writebytes("zig-out/boot41.bin", hdr + gdt_code)
+print os.exists("zig-out/boot41.bin")
+let back = os.readbytes("zig-out/boot41.bin")
+print len(back)
+print unpack("<I", [back[0], back[1], back[2], back[3]])

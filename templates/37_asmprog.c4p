@@ -1,0 +1,6 @@
+# 37_asmprog — run a .c4asm program side by side with C4Plus
+import cpu
+import "templates/sim37.c4asm"
+let m = cpu.new(64)
+print cpu.run(m, sim37)
+print cpu.reg(m, 0)

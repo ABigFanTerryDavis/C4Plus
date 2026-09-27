@@ -1,0 +1,25 @@
+# 28_try — try/catch/fail
+try {
+  fail("boom")
+} catch e {
+  print ("caught: " + e)
+}
+try {
+  let m = {"a": 1}
+  print m["zz"]
+} catch e {
+  print ("key problem: " + e)
+}
+print "alive"
+fn risky(n) {
+  if n < 0 {
+    fail("negative!")
+  }
+  return n * 2
+}
+try {
+  print risky(0 - 3)
+} catch e {
+  print e
+}
+print risky(21)

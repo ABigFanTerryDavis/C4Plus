@@ -1,0 +1,6 @@
+# 10_lists — indexing, negative, len
+let xs = [10, 20, 30]
+print xs[0]
+print xs[-1]
+print len(xs)
+print xs

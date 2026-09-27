@@ -1,0 +1,76 @@
+# PlusIDE Run-button pattern: spawn, stream output, Stop button kills
+# run:  c4c run templates/51_runbtn.c4p
+import os
+import gui
+import time
+
+let app = {"proc": 0, "running": 0}
+
+fn on_run(ev) {
+  if app["running"] == 1 {
+    return
+  }
+  let cmd = gui.get_text(w, cmdline)
+  if len(cmd) == 0 {
+    gui.set_text(w, output, "type a command first")
+    return
+  }
+  app["proc"] = os.spawn(cmd)
+  app["running"] = 1
+  gui.set_text(w, run_btn, "Running...")
+  gui.set_text(w, output, "$ " + cmd)
+}
+
+fn on_stop(ev) {
+  if app["running"] == 0 {
+    return
+  }
+  os.kill(app["proc"])
+  os.close(app["proc"])
+  app["running"] = 0
+  app["proc"] = 0
+  gui.set_text(w, run_btn, "Run")
+  gui.set_text(w, output, gui.get_text(w, output) + "\n[stopped]")
+}
+
+fn on_clear(ev) {
+  gui.set_text(w, output, "")
+}
+
+let w = gui.window("C4Plus runner", 620, 420)
+gui.theme(w, "midnight")
+gui.font(w, 14)
+let cmdline = gui.textbox(w, "ping -n 5 127.0.0.1", 16, 14, 400, 30)
+let run_btn = gui.button(w, "Run", on_run, 428, 14, 80, 30)
+let stop_btn = gui.button(w, "Stop", on_stop, 516, 14, 80, 30)
+let output = gui.label(w, "output appears here", 16, 58, 588, 300)
+let clear_btn = gui.button(w, "Clear", on_clear, 16, 370, 80, 30)
+
+gui.tick(w, 100)
+while gui.alive(w) {
+  let ev = gui.wait(w)
+  if ev == nil {
+    break
+  }
+  if ev["type"] == "tick" {
+    if app["running"] == 1 {
+      let chunk = os.pipe(app["proc"])
+      if len(chunk) > 0 {
+        gui.set_text(w, output, gui.get_text(w, output) + "\n" + chunk)
+      }
+      let code = os.poll(app["proc"])
+      if code != nil {
+        os.close(app["proc"])
+        app["running"] = 0
+        app["proc"] = 0
+        gui.set_text(w, run_btn, "Run")
+        gui.set_text(w, output, gui.get_text(w, output) + "\n[exit " + str(code) + "]")
+      }
+    }
+  }
+}
+if app["running"] == 1 {
+  os.kill(app["proc"])
+  os.close(app["proc"])
+}
+print "runner closed"

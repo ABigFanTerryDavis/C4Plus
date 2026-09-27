@@ -1,0 +1,8 @@
+# LL1 — bit flags like hardware registers
+let flags = 0
+flags = flags | 4
+flags = flags | 1
+print flags
+print flag(flags, 2)
+flags = flags & 11
+print flags

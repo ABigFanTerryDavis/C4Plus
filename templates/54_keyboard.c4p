@@ -1,0 +1,67 @@
+# 54_keyboard — PS/2 keyboard input in a freestanding C4Plus kernel.
+# Build (needs irq.o linked):
+#   c4c --emit-c 54_keyboard.c4p --freestanding -o kbd.c
+#   gcc -m32 -ffreestanding -nostdlib -c -o kbd.o kbd.c -I rt
+#   gcc -m32 -ffreestanding -nostdlib -c -o fs.o rt/c4rt_fs.c
+#   as --32 rt/irq.s -o irq.o
+#   as --32 boot/boot.s -o boot.o
+#   ld -m i386pe -T boot/linkflat.ld -o kbd.pe kbd.o fs.o irq.o
+#   objcopy -O binary kbd.pe kbd.bin
+#   ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
+#   objcopy -O binary -j .boot boot.pe boot.bin
+#   cat boot.bin kbd.bin > kdisk.img   (pad kernel area to 32K)
+#   qemu-system-i386 -drive format=raw,file=kdisk.img -display none ^
+#     -debugcon file:zig-out/k.log -device isa-debug-exit,iobase=0xf4,iosize=0x04 ^
+#     -monitor stdio
+# Then type: (monitor) sendkey a / sendkey b / sendkey ret
+# Expect the typed line echoed; qemu exit = (code<<1)|1.
+
+# remap the PIC: timer + keyboard unmasked (0xFC)
+outb(32, 17)
+outb(160, 17)
+outb(33, 32)
+outb(161, 40)
+outb(33, 4)
+outb(161, 2)
+outb(33, 1)
+outb(161, 1)
+outb(33, 252)
+outb(161, 255)
+
+# PIT at 100Hz so we can time out without input
+outb(67, 52)
+outb(64, 155)
+outb(64, 46)
+
+# IDT: timer -> irq0, keyboard -> irq1
+idt_set(32, irq_addr(), 8, 142)
+idt_set(33, irq1_addr(), 8, 142)
+idt_load()
+sti()
+print "type a line, then enter"
+
+let line = ""
+let done = 0
+while done == 0 {
+  let k = key()
+  if k != -1 {
+    if k == 10 {
+      done = 1
+    } else {
+      if k == 8 {
+        print "backspace"
+      } else {
+        line = line + chr(k)
+      }
+    }
+  }
+  if ticks() > 3000 {
+    print "no input, giving up"
+    done = 2
+  }
+}
+cli()
+if done == 1 {
+  print ("you typed: " + line)
+}
+exit(0)

@@ -1,0 +1,113 @@
+# C4Plus GUI demo — run:  c4c run templates/46_guidemo.c4p
+# Widgets, callbacks, custom drawing, animation, themes.
+# Shared state lives in a dict (dicts are reference values, so callbacks
+# can update it; plain variables are per-call copies).
+import gui
+
+let app = {"playing": 0, "dark": 1, "count": 3, "angle": 0}
+
+fn pick(cond, a, b) {
+  if cond {
+    return a
+  }
+  return b
+}
+
+fn on_play(ev) {
+  app["playing"] = 1 - app["playing"]
+  gui.set_text(gui_w, play_btn, pick(app["playing"], "Pause", "Play"))
+  gui.set_text(gui_w, status, pick(app["playing"], "running...", "paused"))
+}
+
+fn on_speed(ev) {
+  gui.set_text(gui_w, status, "speed = " + str(gui.get(gui_w, speed)))
+}
+
+fn on_theme(ev) {
+  app["dark"] = 1 - app["dark"]
+  let t = pick(app["dark"], "midnight", "light")
+  gui.theme(gui_w, t)
+  gui.set_text(gui_w, status, "theme = " + t)
+}
+
+fn on_add(ev) {
+  app["count"] = app["count"] + 1
+  gui.list_add(gui_w, files, "file" + str(app["count"]) + ".txt")
+  gui.list_select(gui_w, files, gui.list_len(gui_w, files) - 1)
+  gui.set(gui_w, bar, (app["count"] * 10) % 101)
+}
+
+fn on_pick(ev) {
+  let i = gui.list_sel(gui_w, files)
+  if i >= 0 {
+    gui.set_text(gui_w, status, "picked: " + gui.list_get(gui_w, files, i))
+  }
+}
+
+fn on_enter(ev) {
+  let t = gui.get_text(gui_w, name)
+  if len(t) > 0 {
+    gui.list_add(gui_w, files, t)
+    gui.set_text(gui_w, name, "")
+    gui.set_text(gui_w, status, "added: " + t)
+  }
+}
+
+let gui_w = gui.window("C4Plus GUI demo", 720, 540)
+gui.theme(gui_w, "midnight")
+gui.font(gui_w, 15)
+
+let title = gui.label(gui_w, "C4Plus GUI", 20, 16, 400, 30)
+gui.tint(gui_w, title, gui.color("white"))
+let status = gui.label(gui_w, "ready", 20, 48, 520, 22)
+gui.tint(gui_w, status, gui.color("steelblue"))
+
+let play_btn = gui.button(gui_w, "Play", on_play, 20, 84, 110, 34)
+let add_btn = gui.button(gui_w, "Add item", on_add, 142, 84, 110, 34)
+let theme_btn = gui.button(gui_w, "Theme", on_theme, 264, 84, 110, 34)
+let bar = gui.progress(gui_w, 390, 92, 300, 16)
+gui.set(gui_w, bar, 35)
+
+gui.label(gui_w, "Volume", 20, 136, 90, 22)
+let speed = gui.slider(gui_w, 110, 134, 200, 26, 0, 100, 60)
+gui.on(gui_w, speed, on_speed)
+
+gui.label(gui_w, "Options", 20, 176, 90, 22)
+let looping = gui.checkbox(gui_w, "repeat", 110, 174)
+gui.set(gui_w, looping, 1)
+
+let files = gui.list(gui_w, 20, 212, 280, 200)
+gui.on(gui_w, files, on_pick)
+gui.list_add(gui_w, files, "readme.md")
+gui.list_add(gui_w, files, "main.c4p")
+gui.list_add(gui_w, files, "boot.c4asm")
+
+let name = gui.textbox(gui_w, "press enter to add", 330, 240, 340, 30)
+gui.on(gui_w, name, on_enter)
+gui.label(gui_w, "textbox + list + custom drawing", 330, 278, 360, 20)
+
+gui.tick(gui_w, 33)
+while gui.alive(gui_w) {
+  let ev = gui.wait(gui_w)
+  if ev == nil {
+    break
+  }
+  if ev["type"] == "tick" {
+    if app["playing"] == 1 {
+      app["angle"] = app["angle"] + 6
+      if app["angle"] > 360 {
+        app["angle"] = 0
+      }
+      let cx = 500
+      let cy = 390
+      gui.fill(gui_w, cx - 70, cy - 70, 140, 140, gui.color(0x22FFFFFF))
+      gui.outline(gui_w, cx - 70, cy - 70, 140, 140, gui.color("steelblue"))
+      for i in 0..12 {
+        let a = (app["angle"] + i * 30) * 3.14159 / 180
+        gui.line(gui_w, cx + cos(a) * 22, cy + sin(a) * 22, cx + cos(a) * 58, cy + sin(a) * 58, gui.color("cyan"))
+      }
+      gui.text(gui_w, cx - 14, cy + 78, "spin", gui.color("white"))
+    }
+  }
+}
+print "gui demo closed"

@@ -1,0 +1,13 @@
+#target sim
+# countdown r0 from 5, store result
+.entry main
+main:
+  li r0, 5
+  li r1, 1
+loop:
+  sub r0, r1
+  jz r0, done
+  jmp loop
+done:
+  sw r0, 32
+  halt

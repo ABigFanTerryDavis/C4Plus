@@ -1,0 +1,28 @@
+# shell — outside-OS prototype for xos (Derlinus builds this, Yashar integrates it)
+# Run it:  c4c run examples/shell.c4p   (from the C4Plus dir)
+# Pipe it:  "help", "exit" | c4c run examples/shell.c4p
+import "examples/shell_core.c4h"
+print "x(os) shell v0.1 — type help"
+while true {
+  let line = input("xos> ")
+  if line == "" {
+    print "bye"
+    exit(0)
+  }
+  let out = run_cmd(line)
+  if out == "__EXIT__" {
+    print "bye"
+    exit(0)
+  }
+  if out == "__CLEAR__" {
+    let i = 0
+    while i < 25 {
+      print ""
+      i = i + 1
+    }
+  } else {
+    if len(out) > 0 {
+      print out
+    }
+  }
+}

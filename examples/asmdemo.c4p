@@ -1,0 +1,7 @@
+import cpu
+import "examples/count21.c4asm"
+let m = cpu.new(64)
+print cpu.run(m, count21)
+print cpu.reg(m, 0)
+print count21["entry"]
+print count21["labels"]

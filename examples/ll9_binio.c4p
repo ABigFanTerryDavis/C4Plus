@@ -1,0 +1,7 @@
+# LL9 — binary file round trip
+import os
+os.writebytes("zig-out/ll9.bin", [72, 105, 0, 255])
+let back = os.readbytes("zig-out/ll9.bin")
+print back
+print len(back)
+print (back[0] == 72)

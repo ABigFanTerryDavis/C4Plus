@@ -1,0 +1,8 @@
+# 27_time — import time, clock helpers
+import time
+let t0 = time.now()
+print time.stamp()
+time.sleep(0.1)
+let t1 = time.now()
+print (t1 - t0)
+print type(time.stamp())

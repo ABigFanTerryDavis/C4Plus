@@ -1,0 +1,9 @@
+# 14_logic — comparisons and and/or/not
+print (1 < 2)
+print (3 == 3)
+print ("a" == "a")
+print (1 and 1)
+print (1 and 0)
+print (0 or 5)
+print (not 0)
+print (not "hi" == "bye")

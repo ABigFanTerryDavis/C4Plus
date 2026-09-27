@@ -1,0 +1,11 @@
+# 39_stridx — string indexing, ord/chr
+print "hello"[1]
+print "hello"[-1]
+let s = "hi"
+s[1] = "o"
+print s
+print ord("A")
+print chr(65)
+print chr(97)
+let word = "abc"
+print word[0] + word[2]

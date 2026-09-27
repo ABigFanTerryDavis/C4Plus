@@ -1,0 +1,6 @@
+#target x86-64
+# 38_native.c4asm — real x86-64 for --emit-c (script mode: needs --emit-c)
+.entry start
+start:
+  mov $1, %rax
+  add $2, %rax

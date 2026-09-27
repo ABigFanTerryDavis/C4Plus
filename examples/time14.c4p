@@ -1,0 +1,6 @@
+import time
+print time.now()
+print time.stamp()
+time.sleep(0.2)
+print "awake"
+print type(time.now())

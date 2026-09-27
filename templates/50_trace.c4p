@@ -1,0 +1,23 @@
+# Step through this one with:  c4c trace templates/50_trace.c4p
+# The tracer prints every statement, every call, every return value.
+fn fact(n) {
+  if n <= 1 {
+    return 1
+  }
+  return n * fact(n - 1)
+}
+fn fib(n) {
+  if n < 2 {
+    return n
+  }
+  return fib(n - 1) + fib(n - 2)
+}
+let data = [4, 2, 9, 1]
+print sort(data)
+let total = 0
+for x in data {
+  total = total + x
+}
+print ("total = " + str(total))
+print ("fact(5) = " + str(fact(5)))
+print ("fib(10) = " + str(fib(10)))

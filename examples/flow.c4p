@@ -1,0 +1,22 @@
+let a = 5
+if a == 5 {
+  print "five"
+} else {
+  print "not five"
+}
+
+let x = 0
+while x < 3 {
+  print x
+  x = x + 1
+}
+
+if "hi" == "hi" {
+  pt "str eq works"
+}
+
+if 1 and not 0 {
+  print "logic works"
+}
+
+print ("done: " + x)

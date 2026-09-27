@@ -1,0 +1,10 @@
+# 17_nested_loops — break only exits inner loop
+for a in [1, 2, 3] {
+  for b in [1, 2, 3] {
+    if b == 3 {
+      break
+    }
+    print (a * 10 + b)
+  }
+}
+print "done"

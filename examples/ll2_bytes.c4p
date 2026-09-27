@@ -1,0 +1,8 @@
+# LL2 — byte buffer poke/peek
+let mem = bytes(8)
+poke(mem, 0, 72)
+poke(mem, 1, 105)
+poke(mem, 7, 255)
+print peek(mem, 0)
+print peek(mem, 7)
+print len(mem)
