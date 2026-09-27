@@ -1,0 +1,13 @@
+# HEAD for metadata + following a redirect manually
+import http
+try {
+  let h = http.head("https://example.com")
+  print ("head=" + str(h["code"]))
+  print ("ctype=" + h["headers"]["content-type"])
+  print http.redirects(0)
+  let r = http.get("https://httpbin.org/redirect/1")
+  print ("redir=" + str(r["code"]) + " -> " + r["headers"]["location"])
+  print http.redirects(3)
+} catch e {
+  print ("offline? " + e)
+}

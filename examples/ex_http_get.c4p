@@ -1,0 +1,10 @@
+# GET a page and inspect status, headers, body size
+import http
+try {
+  let r = http.get("https://example.com")
+  print ("code=" + str(r["code"]))
+  print ("ctype=" + r["headers"]["content-type"])
+  print ("bytes=" + str(len(r["body"])))
+} catch e {
+  print ("offline? " + e)
+}

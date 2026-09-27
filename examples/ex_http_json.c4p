@@ -1,0 +1,16 @@
+# GET json and parse it (try/catch keeps `c4c check` green offline)
+import http
+import json
+try {
+  let r = http.get("https://httpbin.org/json")
+  print ("code=" + str(r["code"]))
+  let m = {"slideshow": {"title": "offline"}}
+  try {
+    m = json.parse(r["body"])
+  } catch e {
+    print ("parse note: " + e)
+  }
+  print ("title=" + m["slideshow"]["title"])
+} catch e {
+  print ("offline? " + e)
+}

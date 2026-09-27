@@ -1,0 +1,11 @@
+# Download a file straight to disk
+import http
+import os
+try {
+  let dl = http.download("https://example.com/", "example.html")
+  print ("code=" + str(dl["code"]))
+  print ("saved " + str(dl["bytes"]) + " bytes to " + dl["path"])
+  print ("exists=" + str(os.exists("example.html")))
+} catch e {
+  print ("offline? " + e)
+}

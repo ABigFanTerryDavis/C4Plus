@@ -1,0 +1,9 @@
+# POST a form and read the echo
+import http
+try {
+  let p = http.post("https://httpbin.org/post", "name=c4plus", {"Content-Type": "application/x-www-form-urlencoded"})
+  print ("code=" + str(p["code"]))
+  print ("echo bytes=" + str(len(p["body"])))
+} catch e {
+  print ("offline? " + e)
+}
