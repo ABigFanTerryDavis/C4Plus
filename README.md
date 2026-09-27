@@ -757,4 +757,9 @@ stays out of git; public releases go through GitHub releases.
 
 ## License
 
-GPLv3 — see [LICENSE](LICENSE).
+MPL 2.0 (Mozilla Public License 2.0) — see [LICENSE](LICENSE).
+
+Why MPL and not GPL: copyleft in MPL 2.0 applies per file, not to the whole combined
+work. Programs *you* write in C4Plus are yours — combine them with the toolchain, sell
+them, keep them proprietary. Only changes to C4Plus's own source files themselves stay
+under the MPL.
