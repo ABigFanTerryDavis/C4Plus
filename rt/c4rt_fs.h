@@ -110,6 +110,7 @@ void c4_list_push(C4Val l, C4Val v);
 void c4_dict_put(C4Val d, const char *k, C4Val v);
 C4Val c4_outb(C4Val port, C4Val val);
 C4Val c4_inb(C4Val port);
+C4Val c4_inw(C4Val port);
 C4Val c4_sti(void);
 C4Val c4_cli(void);
 C4Val c4_ticks(void);

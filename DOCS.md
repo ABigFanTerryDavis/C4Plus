@@ -544,7 +544,7 @@ send/blocking recv, five `got N` lines, `all tasks done`, clean
 exit; per-task kernel stacks, switch tracer, ESP validation).
 
 Freestanding extras for kernel code (`--emit-c --freestanding`
-only — clean errors elsewhere): `outb(port, val)`, `inb(port)`,
+only — clean errors elsewhere): `outb(port, val)`, `inb(port)`, `inw(port)` (16-bit),
 `sti()`, `cli()`, `ticks()` (PIT-driven counter, see below),
 `key()` (PS/2 scancode driver: next char code, or -1 if empty),
 `irq_addr()` / `irq1_addr()` (addresses of the IRQ stubs in

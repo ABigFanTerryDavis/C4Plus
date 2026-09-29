@@ -1,0 +1,70 @@
+# 61_ata — IDE/ATA PIO disk reads in a freestanding C4Plus kernel.
+# Build (needs irq.o linked for fs.o symbols):
+#   c4c --emit-c 61_ata.c4p --freestanding -o ata.c
+#   gcc -m32 -ffreestanding -nostdlib -c -o ata.o ata.c -I rt
+#   gcc -m32 -ffreestanding -nostdlib -c -o fs.o rt/c4rt_fs.c
+#   as --32 rt/irq.s -o irq.o
+#   as --32 boot/boot.s -o boot.o
+#   ld -m i386pe -T boot/linkflat.ld -o ata.pe ata.o fs.o irq.o
+#   objcopy -O binary ata.pe ata.bin
+#   ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
+#   objcopy -O binary -j .boot boot.pe boot.bin
+#   cat boot.bin ata.bin > adisk.img   (pad kernel area to 32K)
+#   qemu-system-i386 -drive format=raw,file=adisk.img -display none ^
+#     -debugcon file:zig-out/a.log -device isa-debug-exit,iobase=0xf4,iosize=0x04
+# Expect: MBR AA55 proof, kernel-area bytes, qemu exit = (code<<1)|1.
+
+fn ata_wait() {
+  let t = 0
+  while t < 100000 {
+    let s = inb(503)
+    if (s & 128) == 0 {
+      return s
+    }
+    t = t + 1
+  }
+  fail("ata timeout")
+}
+
+fn ata_read(lba) {
+  outb(502, 224 + (lba >> 24))
+  outb(498, 1)
+  outb(499, lba & 255)
+  outb(500, (lba >> 8) & 255)
+  outb(501, (lba >> 16) & 255)
+  outb(503, 32)
+  ata_wait()
+  let t = 0
+  while t < 100000 {
+    let s = inb(503)
+    if s & 1 {
+      fail("ata err")
+    }
+    if s & 8 {
+      break
+    }
+    t = t + 1
+  }
+  let buf = bytes(512)
+  let w = 0
+  while w < 256 {
+    let v = inw(496)
+    poke(buf, w * 2, v & 255)
+    poke(buf, w * 2 + 1, (v >> 8) & 255)
+    w = w + 1
+  }
+  return buf
+}
+
+let mbr = ata_read(0)
+print peek(mbr, 510)
+print peek(mbr, 511)
+if peek(mbr, 510) == 85 and peek(mbr, 511) == 170 {
+  print "ata ok"
+} else {
+  fail("no mbr sig")
+}
+let k = ata_read(1)
+print peek(k, 0)
+print peek(k, 1)
+exit(0)

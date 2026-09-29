@@ -471,6 +471,11 @@ C4Val c4_inb(C4Val port) {
     __asm__ volatile("inb %1, %0" : "=a"(v) : "Nd"((unsigned short)c4_tonum(port)));
     return c4_num((double)v);
 }
+C4Val c4_inw(C4Val port) {
+    unsigned short v;
+    __asm__ volatile("inw %1, %0" : "=a"(v) : "Nd"((unsigned short)c4_tonum(port)));
+    return c4_num((double)v);
+}
 /* ---- 0.3.5: paging, kernel heap, syscalls ---- */
 C4Val c4_poke32(C4Val addr, C4Val val) {
     unsigned long a = (unsigned long)c4_tonum(addr);

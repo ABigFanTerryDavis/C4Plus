@@ -2036,6 +2036,10 @@ pub const Emitter = struct {
                 if (args.len != 1) return self.fail("inb(port) takes 1 arg", .{});
                 return try std.fmt.allocPrint(self.alloc, "c4_inb({s})", .{args[0]});
             }
+            if (std.mem.eql(u8, name, "inw")) {
+                if (args.len != 1) return self.fail("inw(port) takes 1 arg", .{});
+                return try std.fmt.allocPrint(self.alloc, "c4_inw({s})", .{args[0]});
+            }
             if (std.mem.eql(u8, name, "sti") or std.mem.eql(u8, name, "cli")) {
                 if (args.len != 0) return self.fail("'{s}' takes no args", .{name});
                 return try std.fmt.allocPrint(self.alloc, "c4_{s}()", .{name});
@@ -2147,7 +2151,7 @@ pub const Emitter = struct {
                 return try self.alloc.dupe(u8, "c4_idle()");
             }
         } else {
-            const fsonly = [_][]const u8{ "outb", "inb", "sti", "cli", "ticks", "irq_addr", "idt_set", "idt_load", "key", "irq1_addr", "poke32", "peek32", "cr3", "pg_on", "kmalloc", "kfree", "syscall", "syscall_addr", "addr", "gdt_set", "gdt_load", "tss", "enter_user", "elf_load", "user_base", "user_len", "user2_base", "user2_len", "fault_addr", "task_create", "tasks", "idle" };
+            const fsonly = [_][]const u8{ "outb", "inb", "inw", "sti", "cli", "ticks", "irq_addr", "idt_set", "idt_load", "key", "irq1_addr", "poke32", "peek32", "cr3", "pg_on", "kmalloc", "kfree", "syscall", "syscall_addr", "addr", "gdt_set", "gdt_load", "tss", "enter_user", "elf_load", "user_base", "user_len", "user2_base", "user2_len", "fault_addr", "task_create", "tasks", "idle" };
             for (fsonly) |b| {
                 if (std.mem.eql(u8, name, b)) return self.fail("'{s}' is freestanding-only (kernel code via --emit-c --freestanding)", .{name});
             }
