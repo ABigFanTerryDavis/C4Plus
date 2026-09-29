@@ -1,4 +1,4 @@
-# C4Plus — Complete Docs (v0.3.7)
+# C4Plus — Complete Docs (v0.3.8)
 
 C4Plus (`.c4p`) is a small scripting language with headers (`.c4h`),
 assembly sidecars (`.c4asm`), batch files (`.c4bht`), projects
@@ -411,7 +411,9 @@ Widget state: `gui.get(w,id)` (checkbox/radio → 0/1, tabs →
 active page, combo → selection or nil, else value), `gui.set(w,id,v)`
 (checkbox/radio set checked), `gui.get_text`,
 `gui.set_text`, `gui.on(w,id,fn)` (attach/replace a callback),
-`gui.enable`, `gui.show_control`, `gui.tint`, list ops
+`gui.enable`, `gui.show_control`, `gui.tint`, `gui.password(w,id,on)` (mask a
+textbox with `*`, real text kept for `get_text`, 1/0 if applied),
+`gui.focus(w,id)` (move keyboard focus, 1/0), list ops
 (`list_add/list_insert/list_remove/list_clear/list_get/list_set/
 list_len/list_sel/list_select`).
 
@@ -527,18 +529,19 @@ Entry point is `kmain`, not `main`.
 
 `boot/` has a stage-1 sector (`boot.s`), linker scripts and a
 QEMU-tested recipe — see `templates/44_kmain.c4p`. Kernel meter:
-55% — stage-1 loads 96 sectors to 0x10000, enters pmode, runs
+65% — stage-1 loads 96 sectors to 0x10000, enters pmode, runs
 `kmain`, exits via the debug port (QEMU exit `(code<<1)|1`); PIT
 timer IRQ at 100Hz (`52_timer`); PS/2 keyboard driver with line
 input (`54_keyboard`); paging with a 4MB identity map + kernel
 heap with free-list reuse (`55_paging`); `int 0x80` syscalls
 write/exit/ticks (`56_syscall`); GDT/IDT descriptors via
 pack/unpack (`43_gdt`); ring-3 user mode via TSS + full GDT, ELF
-loader + `enter_user`, user pages (4-12MB), DPL3 syscall gate and
-fault gates 0-31 (`58_usermode` — prints `hello from ring3`);
+loader + `enter_user`, user pages (4–12MB), DPL3 syscall gate and
+fault gates 0–31 (`58_usermode` — prints `hello from ring3`);
 preemptive round-robin scheduler with mailbox IPC over the PIT
-(`59_sched` — in progress: switches but hangs on the 3rd switch,
-tasks never reach `all tasks done`).
+(`59_sched` — two tasks ping-pong 1..5 through rendezvous
+send/blocking recv, five `got N` lines, `all tasks done`, clean
+exit; per-task kernel stacks, switch tracer, ESP validation).
 
 Freestanding extras for kernel code (`--emit-c --freestanding`
 only — clean errors elsewhere): `outb(port, val)`, `inb(port)`,

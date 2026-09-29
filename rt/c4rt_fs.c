@@ -100,7 +100,17 @@ static volatile unsigned long c4_tick_count = 0;
 void c4_irq0(void) {
     c4_tick_count++;
 }
-/* ---- 0.3.6: preemptive scheduler (round-robin, mailbox IPC) ---- */
+/* ---- 0.3.8: preemptive scheduler (round-robin, mailbox IPC) ----
+ * Each task (and the kernel idle loop) owns a private kernel stack so a
+ * timer/syscall frame from one task can never clobber another task's saved
+ * frame. c4_schedule reloads TSS.esp0 on every switch: esp0 always
+ * describes the currently-running task, so the next privilege transition
+ * lands on the right stack. Layout (all supervisor pages below 4MB):
+ *   0x90000  kernel/idle stack top (16KB down to 0x8C000)
+ *   0x8C000  task 1 stack top (8KB)
+ *   0x8A000  task 2 stack top (8KB)
+ *   0x88000  task 3 stack top (8KB)
+ * Page tables end at 0x84000, so 0x84000..0x86000 stays a guard gap. */
 #define MAX_TASKS 4
 #define TS_EMPTY 0
 #define TS_READY 1
@@ -115,6 +125,8 @@ static TCB tcbs[MAX_TASKS];
 static int cur_task = 0;
 static int last_task = 0;
 static int tasks_inited = 0;
+static const unsigned kstack_tops[MAX_TASKS] = {0x90000, 0x8C000, 0x8A000, 0x88000};
+static void tss_set_esp0(unsigned top);
 
 static void sched_init(void) {
     if (tasks_inited)
@@ -141,6 +153,21 @@ static void sched_hex(unsigned v) {
     }
 }
 
+static int sched_valid_esp(unsigned ne) {
+    if ((ne & 3) != 0)
+        return 0;
+    if (ne >= 0x86000UL && ne < 0x90000UL)
+        return 1;
+    if (ne >= 0x700000UL && ne < 0x800000UL)
+        return 1;
+    return 0;
+}
+
+static void sched_states(char *out) {
+    for (int q = 0; q < MAX_TASKS; q++)
+        out[q] = (char)('0' + tcbs[q].state);
+}
+
 unsigned c4_schedule(unsigned esp) {
     sched_init();
     c4_tick_count++;
@@ -151,15 +178,13 @@ unsigned c4_schedule(unsigned esp) {
         c4_write(&c, 1);
         c4_write(":", 1);
         sched_hex(esp);
-        c4_write("->", 2);
-        c4_write("L", 1);
+        c4_write("->L", 3);
         c = (char)('0' + last_task);
         c4_write(&c, 1);
         c4_write(" s0=", 4);
-        for (int q = 0; q < MAX_TASKS; q++) {
-            c = (char)('0' + tcbs[q].state);
-            c4_write(&c, 1);
-        }
+        char st[4];
+        sched_states(st);
+        c4_write(st, 4);
         c4_write(" ", 1);
     }
     tcbs[cur_task].esp = esp;
@@ -178,31 +203,56 @@ unsigned c4_schedule(unsigned esp) {
                 c4_write(&c, 1);
                 c4_write(":", 1);
                 sched_hex(tcbs[i].esp);
+                c4_write(" T", 2);
+                sched_hex(kstack_tops[i]);
+                c4_write(" s1=", 4);
+                char st[4];
+                sched_states(st);
+                c4_write(st, 4);
                 c4_write("\n", 1);
             }
             {
                 unsigned ne = tcbs[i].esp;
-                int ok = (ne >= 0x1000UL && ne < 0xC00000UL) && ((ne & 3) == 0);
-                if (!ok) {
+                if (!sched_valid_esp(ne)) {
                     c4_write("BADESP t=", 9);
                     char b[4];
                     b[0] = (char)('0' + i);
                     b[1] = ' ';
                     c4_write(b, 2);
-                    for (int s = 7; s >= 0; s--) {
-                        unsigned d = (ne >> (s * 4)) & 15;
-                        char c = (char)(d < 10 ? '0' + d : 'a' + d - 10);
-                        c4_write(&c, 1);
-                    }
+                    sched_hex(ne);
                     c4_write("\n", 1);
                     c4_halt();
                 }
             }
+            tss_set_esp0(kstack_tops[i]);
             return tcbs[i].esp;
         }
     }
+    if (tcbs[cur_task].state == TS_READY) {
+        tcbs[cur_task].state = TS_RUNNING;
+        last_task = cur_task;
+        if (sched_log_n <= 24) {
+            char c = (char)('0' + cur_task);
+            c4_write(&c, 1);
+            c4_write(":", 1);
+            sched_hex(tcbs[cur_task].esp);
+            c4_write(" T", 2);
+            sched_hex(kstack_tops[cur_task]);
+            c4_write(" s1=", 4);
+            char st[4];
+            sched_states(st);
+            c4_write(st, 4);
+            c4_write("\n", 1);
+        }
+        tss_set_esp0(kstack_tops[cur_task]);
+        return tcbs[cur_task].esp;
+    }
+    if (sched_log_n <= 24) {
+        c4_write("=0:IDLE\n", 8);
+    }
     tcbs[0].state = TS_RUNNING;
     cur_task = 0;
+    tss_set_esp0(kstack_tops[0]);
     return tcbs[0].esp;
 }
 
@@ -223,6 +273,8 @@ C4Val c4_task_create(C4Val entry, C4Val esp_top) {
     unsigned top = (unsigned)c4_tonum(esp_top);
     unsigned base = top - 64;
     unsigned *f = (unsigned *)base;
+    /* f[0] is padding: the scheduler saves the frame base ([es]) and the
+     * irq0 stub restores straight from it (no skip), so E = base + 4. */
     f[0] = 0;
     f[1] = 0x23;
     f[2] = 0x23;
@@ -239,7 +291,7 @@ C4Val c4_task_create(C4Val entry, C4Val esp_top) {
     f[13] = 0x202;
     f[14] = top - 64;
     f[15] = 0x23;
-    tcbs[id].esp = base;
+    tcbs[id].esp = base + 4;
     tcbs[id].state = TS_READY;
     tcbs[id].has_msg = 0;
     __asm__ volatile("sti");
@@ -267,8 +319,19 @@ static int task_send(int tid, long msg) {
         return -1;
     if (tcbs[tid].state == TS_EMPTY)
         return -1;
+    /* rendezvous: wait until the receiver took the previous message so
+     * rapid sends never overwrite (single-slot mailbox, no loss). */
+    __asm__ volatile("sti");
+    while (tcbs[tid].has_msg && tcbs[tid].state != TS_EMPTY)
+        __asm__ volatile("hlt");
+    __asm__ volatile("cli");
+    if (tcbs[tid].state == TS_EMPTY) {
+        __asm__ volatile("sti");
+        return -1;
+    }
     tcbs[tid].msg = msg;
     tcbs[tid].has_msg = 1;
+    __asm__ volatile("sti");
     return 0;
 }
 
@@ -294,16 +357,18 @@ void c4_syscall_dispatch(unsigned *regs) {
     } else if (n == 5) {
         int tid = (int)regs[6];
         long msg = (long)regs[8];
-        __asm__ volatile("cli");
         int r = task_send(tid, msg);
-        __asm__ volatile("sti");
         regs[9] = (unsigned)r;
     } else if (n == 6) {
-        __asm__ volatile("sti");
-        while (!tcbs[cur_task].has_msg)
+        __asm__ volatile("cli");
+        while (!tcbs[cur_task].has_msg) {
+            __asm__ volatile("sti");
             __asm__ volatile("hlt");
-        tcbs[cur_task].has_msg = 0;
+            __asm__ volatile("cli");
+        }
         regs[9] = (unsigned)tcbs[cur_task].msg;
+        tcbs[cur_task].has_msg = 0;
+        __asm__ volatile("sti");
     } else if (n == 7) {
         regs[9] = (unsigned)cur_task;
     } else {
@@ -525,6 +590,9 @@ C4Val c4_gdt_load(void) {
     return c4_nil();
 }
 static unsigned char c4_tss[104];
+static void tss_set_esp0(unsigned top) {
+    *(volatile unsigned *)(c4_tss + 4) = top;
+}
 C4Val c4_tss_init(C4Val esp0) {
     for (int i = 0; i < 104; i++)
         c4_tss[i] = 0;

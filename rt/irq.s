@@ -14,7 +14,6 @@ _irq0_stub:
     push %esp
     call _c4_schedule
     mov %eax, %esp
-    add $4, %esp
     pop %es
     pop %ds
     popa

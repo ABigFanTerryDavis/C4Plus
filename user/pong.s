@@ -48,13 +48,30 @@ ploop:
     int $0x80
     jmp .
 ponger:
+    mov $0, %edi
+pongloop:
     mov $6, %eax
     xor %ebx, %ebx
     xor %ecx, %ecx
     xor %edx, %edx
     int $0x80
     cmp $0, %eax
-    jl ponger
+    jl pongloop
+    push %eax
+    push %edi
+    push %esi
+    lea (got-pic_base)(%esi), %ebx
+    mov $4, %ecx
+    mov $1, %eax
+    xor %edx, %edx
+    int $0x80
+    pop %esi
+    pop %edi
+    pop %eax
+    call print_num
+    inc %edi
+    cmp $5, %edi
+    jl pongloop
     mov $2, %eax
     mov $20, %ebx
     xor %ecx, %ecx

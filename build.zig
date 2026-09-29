@@ -51,7 +51,7 @@ fn addTool(
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const version = "0.3.7";
+    const version = "0.3.8";
 
     const c4c = addTool(b, "c4c", version, target, optimize);
     _ = addTool(b, "c4pp", version, target, optimize);

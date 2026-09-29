@@ -643,6 +643,14 @@ fn replMain(io: Io, arena: std.mem.Allocator, envmap: ?*const std.process.Enviro
         sub.imported_physics = repl_physics;
         sub.imported_json = repl_json;
         sub.imported_time = repl_time;
+        sub.imported_heap = repl_heap;
+        sub.imported_cpu = repl_cpu;
+        sub.imported_gui = repl_gui;
+        sub.imported_hex = repl_hex;
+        sub.imported_random = repl_random;
+        sub.imported_strings = repl_strings;
+        sub.imported_http = repl_http;
+        sub.http_redirects = repl_http_redir;
         sub.run() catch |err| {
             stdout.flush() catch {};
             if (err == ParseError.ExitSignal) {
@@ -667,6 +675,14 @@ fn replMain(io: Io, arena: std.mem.Allocator, envmap: ?*const std.process.Enviro
         repl_physics = sub.imported_physics;
         repl_json = sub.imported_json;
         repl_time = sub.imported_time;
+        repl_heap = sub.imported_heap;
+        repl_cpu = sub.imported_cpu;
+        repl_gui = sub.imported_gui;
+        repl_hex = sub.imported_hex;
+        repl_random = sub.imported_random;
+        repl_strings = sub.imported_strings;
+        repl_http = sub.imported_http;
+        repl_http_redir = sub.http_redirects;
         try stdout.flush();
     }
     try stdout.flush();
@@ -676,6 +692,14 @@ var repl_os: bool = false;
 var repl_physics: bool = false;
 var repl_json: bool = false;
 var repl_time: bool = false;
+var repl_heap: bool = false;
+var repl_cpu: bool = false;
+var repl_gui: bool = false;
+var repl_hex: bool = false;
+var repl_random: bool = false;
+var repl_strings: bool = false;
+var repl_http: bool = false;
+var repl_http_redir: u16 = 3;
 
 fn replBlank(chunk: []const u8) bool {
     var i: usize = 0;
@@ -4266,6 +4290,21 @@ const Parser = struct {
             c.tint = try self.guiColorOf(arg_vals[2]);
             gui.redraw(win);
             return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, method, "password")) {
+            if (arg_vals.len != 3) return ParseError.ArityMismatch;
+            const win = try self.guiWin(arg_vals[0]);
+            const c = try self.guiCtl(win, arg_vals[1]);
+            if (self.dry) return Value{ .number = 1 };
+            const on = (guiNum(arg_vals, 2) orelse 1) != 0;
+            return Value{ .number = @intFromBool(gui.setPassword(win, c.id, on)) };
+        }
+        if (std.mem.eql(u8, method, "focus")) {
+            if (arg_vals.len != 2) return ParseError.ArityMismatch;
+            const win = try self.guiWin(arg_vals[0]);
+            const c = try self.guiCtl(win, arg_vals[1]);
+            if (self.dry) return Value{ .number = 1 };
+            return Value{ .number = @intFromBool(gui.focusControl(win, c.id)) };
         }
         if (std.mem.eql(u8, method, "list_add")) {
             if (arg_vals.len != 3) return ParseError.ArityMismatch;

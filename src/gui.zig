@@ -65,6 +65,7 @@ pub const Control = struct {
     scroll: i32 = 0,
     caret: i32 = 0,
     caret_on: bool = true,
+    password: bool = false,
     tint: ?Color = null,
     cb: i32 = -1,
     parent: u32 = 0,
@@ -860,6 +861,23 @@ pub fn listSelect(win: *Window, id: u32, idx: i32) Error!void {
 pub fn listSel(win: *Window, id: u32) i32 {
     const c = findControl(win, id) orelse return -1;
     return c.sel;
+}
+
+pub fn setPassword(win: *Window, id: u32, on: bool) bool {
+    const c = findControl(win, id) orelse return false;
+    if (c.kind != .textbox) return false;
+    c.password = on;
+    redraw(win);
+    return true;
+}
+
+pub fn focusControl(win: *Window, id: u32) bool {
+    const t = findControl(win, id) orelse return false;
+    if (!t.enabled or !t.visible or !focusable(t.kind)) return false;
+    for (win.controls.items) |*c| c.focused = false;
+    t.focused = true;
+    redraw(win);
+    return true;
 }
 
 fn packXY(x: i32, y: i32) LPARAM {
@@ -2050,6 +2068,28 @@ fn paintControl(win: *Window, hdc: Hdc, c: *Control) void {
         .textbox => {
             roundRectR(hdc, c.x, c.y, c.w, c.h, 6, th.field, if (c.focused) th.accent else th.border);
             const pad: i32 = 9;
+            if (c.password) {
+                var nchars: usize = 0;
+                for (c.text) |b| {
+                    if ((b & 0xC0) != 0x80) nchars += 1;
+                }
+                const masked = win.alloc.alloc(u8, nchars) catch return;
+                @memset(masked, '*');
+                const tw = utf16(win.alloc, masked) catch return;
+                const pre = utf8Before(c.text, c.caret);
+                var npre: usize = 0;
+                for (pre) |b| {
+                    if ((b & 0xC0) != 0x80) npre += 1;
+                }
+                const start: usize = if (npre > 0) visibleStart(tw, @intCast(npre)) else 0;
+                textR(hdc, c.x + pad, c.y, c.w - pad * 2, c.h, tw[start..], fg, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+                if (c.focused and c.caret_on) {
+                    const starw = measure(win, hdc, "*");
+                    const cx = c.x + pad + starw * @as(i32, @intCast(npre));
+                    lineR(hdc, cx, c.y + 6, cx, c.y + c.h - 6, th.accent, 1);
+                }
+                return;
+            }
             const tw = utf16(win.alloc, c.text) catch return;
             const start: usize = if (c.caret > 0) visibleStart(tw, c.caret) else 0;
             textR(hdc, c.x + pad, c.y, c.w - pad * 2, c.h, tw[start..], fg, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
