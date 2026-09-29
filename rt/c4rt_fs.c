@@ -345,6 +345,8 @@ void c4_syscall_dispatch(unsigned *regs) {
     } else if (n == 2) {
         if (cur_task != 0) {
             tcbs[cur_task].state = TS_EMPTY;
+            tcbs[cur_task].has_msg = 0;
+            tcbs[cur_task].msg = 0;
             __asm__ volatile("sti");
             for (;;)
                 __asm__ volatile("hlt");

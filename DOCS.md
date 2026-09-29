@@ -1,4 +1,4 @@
-# C4Plus — Complete Docs (v0.3.8)
+# C4Plus — Complete Docs (v0.3.9)
 
 C4Plus (`.c4p`) is a small scripting language with headers (`.c4h`),
 assembly sidecars (`.c4asm`), batch files (`.c4bht`), projects

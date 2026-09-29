@@ -744,8 +744,8 @@ recipe.
 
 ## Versioning
 
-The version lives in two places — `build.zig` (`const version = "0.3.8"`) and
-`build.zig.zon` (`.version = "0.3.8"`) — and each release is snapshotted as
+The version lives in two places — `build.zig` (`const version = "0.3.9"`) and
+`build.zig.zon` (`.version = "0.3.9"`) — and each release is snapshotted as
 `zip/c4plus-<version>-src.zip` (older snapshots are kept). `zip/` is local history and
 stays out of git; public releases go through GitHub releases.
 
@@ -758,7 +758,9 @@ stays out of git; public releases go through GitHub releases.
 - **0.3.8 (this):** working `59_sched` switch (the `add $4` off-by-one is gone, per-task
   kernel stacks, rendezvous send, five `got N` lines + `all tasks done`), REPL import
   persistence for every module, GUI `password` + `focus`.
-- After that: exit/reap cleanup, filesystem + drivers, shell.
+- **0.3.9 (this):** stabilization — full interp-vs-native suite green (94 files),
+  task-exit mailbox hygiene, no new features. Closes the 0.3.x line.
+- After that: the big one — filesystem + drivers, shell.
 
 ---
 
