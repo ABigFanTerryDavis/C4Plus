@@ -836,6 +836,17 @@ static void dict_put(C4Dict *d, const char *k, C4Val v) {
     d->len++;
 }
 
+void c4_list_push(C4Val l, C4Val v) {
+    if (l.t != 2)
+        c4_err("TypeError");
+    list_push(l.list, v);
+}
+void c4_dict_put(C4Val d, const char *k, C4Val v) {
+    if (d.t != 3)
+        c4_err("TypeError");
+    dict_put(d.dict, k, v);
+}
+
 /* decimal digits of v (0 <= v < 2^53, integer), written backward from *pp */
 static void c4_putuint(char **pp, double v) {
     if (v < 1) {
@@ -1594,6 +1605,44 @@ C4Val c4_bxor(C4Val a, C4Val b) {
 }
 C4Val c4_bnot(C4Val v) {
     return c4_fromu64(~c4_u64(v));
+}
+static unsigned c4_bitsmall(C4Val v) {
+    if (v.t != 0 || v.num != c4_trunc(v.num) || v.num < 0 || v.num > 63)
+        c4_err("TypeError");
+    return (unsigned)v.num;
+}
+C4Val c4_bits(C4Val v, C4Val hi, C4Val lo) {
+    unsigned long long x = c4_u64(v);
+    unsigned h = c4_bitsmall(hi), l = c4_bitsmall(lo);
+    if (h < l)
+        c4_err("TypeError");
+    unsigned long long w = x >> l;
+    if (h - l < 63)
+        w &= ((1ULL << (h - l + 1)) - 1);
+    return c4_fromu64(w);
+}
+C4Val c4_setbits(C4Val v, C4Val hi, C4Val lo, C4Val f) {
+    unsigned long long x = c4_u64(v);
+    unsigned h = c4_bitsmall(hi), l = c4_bitsmall(lo);
+    unsigned long long fv = c4_u64(f);
+    if (h < l)
+        c4_err("TypeError");
+    unsigned width = h - l + 1;
+    if (width < 64 && fv >= (1ULL << width))
+        c4_err("TypeError");
+    unsigned long long m = (width < 64) ? (((1ULL << width) - 1) << l) : ~(0ULL);
+    return c4_fromu64((x & ~m) | ((fv << l) & m));
+}
+C4Val c4_flag(C4Val v, C4Val n) {
+    unsigned long long x = c4_u64(v);
+    unsigned b = c4_bitsmall(n);
+    return c4_num((double)((x >> b) & 1));
+}
+c4_size_t c4_slen(const char *s) {
+    c4_size_t n = 0;
+    while (s[n])
+        n++;
+    return n;
 }
 C4Val c4_shl(C4Val a, C4Val b) {
     unsigned long long x = c4_u64(a), s = c4_u64(b);

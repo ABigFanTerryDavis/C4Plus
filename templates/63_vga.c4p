@@ -1,0 +1,107 @@
+# 63_vga — VGA text-mode console in a freestanding C4Plus kernel.
+# Build (same shape as 61_ata):
+#   c4c --emit-c 63_vga.c4p --freestanding -o vga.c
+#   gcc -m32 -ffreestanding -nostdlib -c -o vga.o vga.c -I rt
+#   gcc -m32 -ffreestanding -nostdlib -c -o fs.o rt/c4rt_fs.c
+#   as --32 rt/irq.s -o irq.o
+#   as --32 boot/boot.s -o boot.o
+#   ld -m i386pe -T boot/linkflat.ld -o vga.pe vga.o fs.o irq.o
+#   objcopy -O binary vga.pe vga.bin
+#   ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
+#   objcopy -O binary -j .boot boot.pe boot.bin
+#   cat boot.bin vga.bin > vdisk.img   (pad kernel area to 64K)
+#   qemu-system-i386 -drive format=raw,file=vdisk.img -display none ^
+#     -debugcon file:zig-out/v.log -device isa-debug-exit,iobase=0xf4,iosize=0x04
+# Expect: screen writes verified by readback over serial (run with a display
+# to SEE it: drop -display none), scroll proof, qemu exit = (code<<1)|1.
+
+fn vga_put(r, c, ch, attr) {
+  let off = 753664 + (r * 80 + c) * 2
+  let a = off - off % 4
+  let v = peek32(a)
+  let sh = (off - a) * 8
+  poke32(a, setbits(v, sh + 15, sh, ch + attr * 256))
+}
+
+fn vga_get(r, c) {
+  let off = 753664 + (r * 80 + c) * 2
+  let a = off - off % 4
+  let v = peek32(a)
+  return bits(v, (off - a) * 8 + 15, (off - a) * 8)
+}
+
+fn vga_clear(attr) {
+  let i = 0
+  while i < 500 {
+    poke32(753664 + i * 4, 2097184 + attr * 16777472)
+    i = i + 1
+  }
+}
+
+fn vga_scroll() {
+  let r = 0
+  while r < 24 {
+    let i = 0
+    while i < 40 {
+      poke32(753664 + r * 160 + i * 4, peek32(753664 + (r + 1) * 160 + i * 4))
+      i = i + 1
+    }
+    r = r + 1
+  }
+  let i = 0
+  while i < 40 {
+    poke32(753664 + 24 * 160 + i * 4, 119539488)
+    i = i + 1
+  }
+}
+
+fn vga_move(r, c) {
+  let pos = r * 80 + c
+  outb(980, 14)
+  outb(981, (pos >> 8) & 255)
+  outb(980, 15)
+  outb(981, pos & 255)
+}
+
+fn vga_print(s, attr, cur) {
+  for ch in s {
+    if ord(ch) == 10 {
+      cur[1] = 0
+      cur[0] = cur[0] + 1
+    } else {
+      vga_put(cur[0], cur[1], ord(ch), attr)
+      cur[1] = cur[1] + 1
+      if cur[1] == 80 {
+        cur[1] = 0
+        cur[0] = cur[0] + 1
+      }
+    }
+    if cur[0] == 25 {
+      vga_scroll()
+      cur[0] = 24
+    }
+  }
+  vga_move(cur[0], cur[1])
+  return cur
+}
+
+vga_clear(7)
+print vga_get(0, 0)
+let cur = [0, 0]
+vga_print("hi vga", 15, cur)
+print vga_get(0, 0)
+print vga_get(0, 1)
+vga_clear(7)
+cur[0] = 0
+cur[1] = 0
+let n = 0
+while n < 30 {
+  vga_print("line " + str(n), 7, cur)
+  vga_print(chr(10), 7, cur)
+  n = n + 1
+}
+print vga_get(24, 0)
+print vga_get(24, 5)
+print vga_get(23, 5)
+print "vga ok"
+exit(0)

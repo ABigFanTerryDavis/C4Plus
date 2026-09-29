@@ -1004,7 +1004,8 @@ pub const Emitter = struct {
         try self.w(tc);
         try self.w(");\n");
         try self.emitIndent();
-        try self.w("for (size_t ");
+        try self.w("for (");
+        try self.w(if (self.fs) "c4_size_t " else "size_t ");
         try self.w(ti);
         try self.w(" = 0; ");
         try self.w(ti);
@@ -1046,7 +1047,6 @@ pub const Emitter = struct {
         try self.emitBodySrc(body, body_line);
         self.emitTryLoopPop();
         self.loop_depth -= 1;
-        self.indent -= 1;
         try self.emitIndent();
         try self.w("}\n");
         self.indent -= 1;
@@ -1056,11 +1056,12 @@ pub const Emitter = struct {
         try self.w(".t == C4_STR) {\n");
         self.indent += 1;
         try self.emitIndent();
-        try self.w("for (size_t ");
+        try self.w("for (");
+        try self.w(if (self.fs) "c4_size_t " else "size_t ");
         try self.w(ti);
         try self.w(" = 0; ");
         try self.w(ti);
-        try self.w(" < strlen(");
+        try self.w(if (self.fs) " < c4_slen(" else " < strlen(");
         try self.w(tc);
         try self.w(".str); ");
         try self.w(ti);
@@ -1102,9 +1103,12 @@ pub const Emitter = struct {
         try self.w("} else {\n");
         self.indent += 1;
         try self.emitIndent();
-        try self.w("for (size_t ");
+        try self.w("for (");
+        try self.w(if (self.fs) "c4_size_t " else "size_t ");
         try self.w(ti);
-        try self.w(" = 0, __c4_n = (size_t)c4_len(");
+        try self.w(" = 0, __c4_n = (");
+        try self.w(if (self.fs) "c4_size_t" else "size_t");
+        try self.w(")c4_len(");
         try self.w(tc);
         try self.w(").num; ");
         try self.w(ti);
