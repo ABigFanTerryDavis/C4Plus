@@ -9,7 +9,7 @@
 #   objcopy -O binary pg.pe pg.bin
 #   ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
 #   objcopy -O binary -j .boot boot.pe boot.bin
-#   cat boot.bin pg.bin > pdisk.img   (pad kernel area to 32K)
+#   cat boot.bin pg.bin > pdisk.img   (pad kernel area to 64K)
 #   qemu-system-i386 -drive format=raw,file=pdisk.img -display none ^
 #     -debugcon file:zig-out/p.log -device isa-debug-exit,iobase=0xf4,iosize=0x04
 # Expect: paging on, heap reuse shown, qemu exit = (code<<1)|1.

@@ -9,7 +9,7 @@
 #   objcopy -O binary ata.pe ata.bin
 #   ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
 #   objcopy -O binary -j .boot boot.pe boot.bin
-#   cat boot.bin ata.bin > adisk.img   (pad kernel area to 32K)
+#   cat boot.bin ata.bin > adisk.img   (pad kernel area to 64K)
 #   qemu-system-i386 -drive format=raw,file=adisk.img -display none ^
 #     -debugcon file:zig-out/a.log -device isa-debug-exit,iobase=0xf4,iosize=0x04
 # Expect: MBR AA55 proof, kernel-area bytes, qemu exit = (code<<1)|1.

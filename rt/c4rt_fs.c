@@ -9,7 +9,7 @@ void __chkstk_ms(void) {
 void __chkstk(void) {
 }
 
-static unsigned char c4_pool[256 * 1024];
+static unsigned char c4_pool[1024 * 1024];
 static c4_size_t c4_pool_used = 0;
 
 static void *xmalloc(c4_size_t n) {

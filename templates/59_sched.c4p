@@ -15,7 +15,7 @@
 #   objcopy -O binary sc.pe sc.bin
 #   ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
 #   objcopy -O binary -j .boot boot.pe boot.bin
-#   cat boot.bin sc.bin > sdisk.img   (pad kernel area to 48K)
+#   cat boot.bin sc.bin > sdisk.img   (pad kernel area to 64K)
 #   qemu-system-i386 -drive format=raw,file=sdisk.img -display none ^
 #     -debugcon file:zig-out/s.log -device isa-debug-exit,iobase=0xf4,iosize=0x04
 # Expect five "got N" lines, then qemu exit = (code<<1)|1.

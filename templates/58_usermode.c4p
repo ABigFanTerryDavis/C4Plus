@@ -12,7 +12,7 @@
 #   objcopy -O binary um.pe um.bin
 #   ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
 #   objcopy -O binary -j .boot boot.pe boot.bin
-#   cat boot.bin um.bin > udisk.img   (pad kernel area to 32K)
+#   cat boot.bin um.bin > udisk.img   (pad kernel area to 64K)
 #   qemu-system-i386 -drive format=raw,file=udisk.img -display none ^
 #     -debugcon file:zig-out/u.log -device isa-debug-exit,iobase=0xf4,iosize=0x04
 # Expect: user hello, ring3 proof, exit 199 (= exit 99 via syscall).

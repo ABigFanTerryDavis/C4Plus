@@ -9,7 +9,7 @@
 #   objcopy -O binary timer.pe timer.bin
 #   ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
 #   objcopy -O binary -j .boot boot.pe boot.bin
-#   cat boot.bin timer.bin > tdisk.img   (pad kernel area to 32K)
+#   cat boot.bin timer.bin > tdisk.img   (pad kernel area to 64K)
 #   qemu-system-i386 -drive format=raw,file=tdisk.img -display none ^
 #     -debugcon file:zig-out/t.log -device isa-debug-exit,iobase=0xf4,iosize=0x04
 # Expect tick prints; qemu exit = (code<<1)|1.

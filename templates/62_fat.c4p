@@ -1,0 +1,159 @@
+# 62_fat — FAT12 read-only filesystem in a freestanding C4Plus kernel.
+# Build the FAT volume first (needs user2.elf from the 59_sched recipe):
+#   python user/mkfat.py zig-out/fat12.bin user/hello.txt zig-out/user2.elf
+# Then the kernel (same shape as 61_ata):
+#   c4c --emit-c 62_fat.c4p --freestanding -o fat.c
+#   gcc -m32 -ffreestanding -nostdlib -c -o fat.o fat.c -I rt
+#   gcc -m32 -ffreestanding -nostdlib -c -o fs.o rt/c4rt_fs.c
+#   as --32 rt/irq.s -o irq.o
+#   as --32 boot/boot.s -o boot.o
+#   ld -m i386pe -T boot/linkflat.ld -o fat.pe fat.o fs.o irq.o
+#   objcopy -O binary fat.pe fat.bin
+#   ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
+#   objcopy -O binary -j .boot boot.pe boot.bin
+#   cat boot.bin fat.bin(pad 64K) fat12.bin > f1disk.img  (fat base LBA 129)
+#   qemu-system-i386 -drive format=raw,file=f1disk.img -display none ^
+#     -debugcon file:zig-out/f1.log -device isa-debug-exit,iobase=0xf4,iosize=0x04
+# Expect: BPB values, root names, file text, ELF magic, qemu exit = (code<<1)|1.
+
+fn ata_wait() {
+  let t = 0
+  while t < 100000 {
+    let s = inb(503)
+    if (s & 128) == 0 {
+      return s
+    }
+    t = t + 1
+  }
+  fail("ata timeout")
+}
+
+fn ata_read(lba) {
+  outb(502, 224 + (lba >> 24))
+  outb(498, 1)
+  outb(499, lba & 255)
+  outb(500, (lba >> 8) & 255)
+  outb(501, (lba >> 16) & 255)
+  outb(503, 32)
+  ata_wait()
+  let t = 0
+  while t < 100000 {
+    let s = inb(503)
+    if s & 1 {
+      fail("ata err")
+    }
+    if s & 8 {
+      break
+    }
+    t = t + 1
+  }
+  let buf = bytes(512)
+  let w = 0
+  while w < 256 {
+    let v = inw(496)
+    poke(buf, w * 2, v & 255)
+    poke(buf, w * 2 + 1, (v >> 8) & 255)
+    w = w + 1
+  }
+  return buf
+}
+
+fn rd16(buf, off) {
+  return peek(buf, off) + peek(buf, off + 1) * 256
+}
+
+fn rd32(buf, off) {
+  return peek(buf, off) + peek(buf, off + 1) * 256 + peek(buf, off + 2) * 65536 + peek(buf, off + 3) * 16777216
+}
+
+fn fat12(fat, cl) {
+  let off = cl + floor(cl / 2)
+  if cl % 2 == 0 {
+    return peek(fat, off) + (peek(fat, off + 1) & 15) * 256
+  }
+  return (peek(fat, off) >> 4) + peek(fat, off + 1) * 16
+}
+
+let BASE = 129
+let bs = ata_read(BASE)
+print rd16(bs, 11)
+print peek(bs, 13)
+print rd16(bs, 14)
+print peek(bs, 16)
+print rd16(bs, 17)
+print rd16(bs, 22)
+
+let fat = ata_read(BASE + 1)
+let root = ata_read(BASE + 5)
+let e = 0
+while e < 16 {
+  if peek(root, e * 32) == 0 {
+    break
+  }
+  let nm = ""
+  let k = 0
+  while k < 11 {
+    nm = nm + chr(peek(root, e * 32 + k))
+    k = k + 1
+  }
+  print nm
+  e = e + 1
+}
+
+fn fat_read(name83) {
+  let root = ata_read(134)
+  let fat = ata_read(130)
+  let e = 0
+  while e < 16 {
+    if peek(root, e * 32) == 0 {
+      break
+    }
+    let nm = ""
+    let k = 0
+    while k < 11 {
+      nm = nm + chr(peek(root, e * 32 + k))
+      k = k + 1
+    }
+    if nm == name83 {
+      print ("found " + name83)
+      let cl = rd16(root, e * 32 + 26)
+      let sz = rd32(root, e * 32 + 28)
+      print cl
+      print sz
+      let out = bytes(sz)
+      let pos = 0
+      while cl < 4088 {
+        let sec = ata_read(133 + cl)
+        let b = 0
+        while b < 512 {
+          if pos < sz {
+            poke(out, pos, peek(sec, b))
+            pos = pos + 1
+          }
+          b = b + 1
+        }
+        cl = fat12(fat, cl)
+      }
+      return out
+    }
+    e = e + 1
+  }
+  fail("not found")
+}
+
+let hello = fat_read("HELLO   TXT")
+let s = ""
+let i = 0
+while i < len(hello) {
+  s = s + chr(peek(hello, i))
+  i = i + 1
+}
+print s
+let words = fat_read("WORDS   TXT")
+print len(words)
+print peek(words, 0)
+let elf = fat_read("PONG    ELF")
+print len(elf)
+print peek(elf, 0)
+print peek(elf, 1)
+exit(0)

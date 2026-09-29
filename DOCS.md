@@ -529,7 +529,7 @@ Entry point is `kmain`, not `main`.
 
 `boot/` has a stage-1 sector (`boot.s`), linker scripts and a
 QEMU-tested recipe — see `templates/44_kmain.c4p`. Kernel meter:
-65% — stage-1 loads 96 sectors to 0x10000, enters pmode, runs
+65% — stage-1 loads 128 sectors to 0x10000, enters pmode, runs
 `kmain`, exits via the debug port (QEMU exit `(code<<1)|1`); PIT
 timer IRQ at 100Hz (`52_timer`); PS/2 keyboard driver with line
 input (`54_keyboard`); paging with a 4MB identity map + kernel

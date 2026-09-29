@@ -13,13 +13,14 @@ _bootmain:
     sti
     mov $0x41, %al
     out %al, $0xE9
-    /* load 96 sectors via int13 EDD (LBA 1..96) to 0x10000; DL = BIOS drive.
+    /* load 128 sectors via int13 EDD (LBA 1..128) to 0x10000; DL = BIOS drive.
        0x10000 (seg 0x1000) is clear of the boot sector, stack, and DAP.
-       96 sectors = 48KB, room for kernel + embedded user ELF. */
+       128 sectors = 64KB, room for kernel + slack (keep kernel bins padded
+       to 64K and anything after (e.g. a FAT volume) at LBA 160+). */
     mov %dl, boot_drive
     movw $0, counter
 load_loop:
-    cmpw $0x60, counter
+    cmpw $0x80, counter
     jge loaded
     /* BIOS may clobber DS/ES/DL and the stack: reload them every iteration,
        keep the counter in memory (never on the stack) */
@@ -78,9 +79,9 @@ pm_entry:
     and $0xFFFFFFFB, %eax
     mov %eax, %cr0
     mov $0x90000, %esp
-    /* zero kernel BSS: 0x200000..0x250000 (pool 256K + slack; matches linkflat.ld) */
+    /* zero kernel BSS: 0x200000..0x310000 (1MB pool + slack; matches linkflat.ld) */
     mov $0x200000, %edi
-    mov $0x50000, %ecx
+    mov $0x110000, %ecx
     xor %eax, %eax
     rep stosb
     mov $0x44, %al

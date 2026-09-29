@@ -667,7 +667,7 @@ The moving parts:
 
 | file               | role                                                              |
 | ------------------ | ----------------------------------------------------------------- |
-| `boot/boot.s`      | stage-1 sector: loads 96 sectors to `0x10000`, enters pmode, calls `kmain` |
+| `boot/boot.s`      | stage-1 sector: loads 128 sectors to `0x10000`, enters pmode, calls `kmain` |
 | `boot/bootlink.ld` | boot-sector link script                                           |
 | `boot/linkflat.ld` | kernel link: `.text.kmain` first at `0x10000`, BSS at `0x200000`  |
 | `boot/link.ld`     | alternate kernel link                                             |
@@ -705,7 +705,7 @@ a 100Hz PIT slice, round-robin context switches in `c4_schedule`, and mailbox IP
 
 ### Kernel meter
 
-**65%** — stage-1 loads 96 sectors to `0x10000`, enters pmode, runs `kmain`, exits via the
+**65%** — stage-1 loads 128 sectors to `0x10000`, enters pmode, runs `kmain`, exits via the
 debug port (QEMU exit `(code<<1)|1`); PIT timer IRQ at 100Hz (`52_timer`); PS/2 keyboard
 driver with line input (`54_keyboard`); paging with a 4MB identity map + kernel heap with
 free-list reuse (`55_paging`); `int 0x80` syscalls write/exit/ticks (`56_syscall`); GDT/IDT
