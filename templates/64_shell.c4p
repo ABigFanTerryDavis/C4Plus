@@ -1,0 +1,313 @@
+# 64_shell — interactive kernel shell: ls/cat/clear/help/ver/poweroff.
+# Keyboard line input, VGA console, FAT12 files. No paging, no timer.
+# Build (same shape as 61_ata):
+#   c4c --emit-c 64_shell.c4p --freestanding -o sh.c
+#   gcc -m32 -ffreestanding -nostdlib -c -o sh.o sh.c -I rt
+#   gcc -m32 -ffreestanding -nostdlib -c -o fs.o rt/c4rt_fs.c
+#   as --32 rt/irq.s -o irq.o
+#   as --32 boot/boot.s -o boot.o
+#   ld -m i386pe -T boot/linkflat.ld -o sh.pe sh.o fs.o irq.o
+#   objcopy -O binary sh.pe sh.bin
+#   ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
+#   objcopy -O binary -j .boot boot.pe boot.bin
+#   cat boot.bin sh.bin(pad 96K) fat12.bin > shdisk.img  (fat base LBA 193;
+#     build fat12.bin with: python user/mkfat.py zig-out/fat12.bin user/hello.txt zig-out/user2.elf)
+#   qemu-system-i386 -drive format=raw,file=shdisk.img -display none ^
+#     -debugcon file:zig-out/sh.log -device isa-debug-exit,iobase=0xf4,iosize=0x04 ^
+#     -monitor stdio
+# Then type: help, ls, cat hello.txt, ver, poweroff (or sendkey h-e-l-p ret ...).
+# Expect echoed lines, file text, qemu exit = (code<<1)|1 on poweroff.
+
+fn ata_wait() {
+  let t = 0
+  while t < 100000 {
+    let s = inb(503)
+    if (s & 128) == 0 {
+      return s
+    }
+    t = t + 1
+  }
+  fail("ata timeout")
+}
+
+fn ata_read(lba) {
+  outb(502, 224 + (lba >> 24))
+  outb(498, 1)
+  outb(499, lba & 255)
+  outb(500, (lba >> 8) & 255)
+  outb(501, (lba >> 16) & 255)
+  outb(503, 32)
+  ata_wait()
+  let t = 0
+  while t < 100000 {
+    let s = inb(503)
+    if s & 1 {
+      fail("ata err")
+    }
+    if s & 8 {
+      break
+    }
+    t = t + 1
+  }
+  let buf = bytes(512)
+  let w = 0
+  while w < 256 {
+    let v = inw(496)
+    poke(buf, w * 2, v & 255)
+    poke(buf, w * 2 + 1, (v >> 8) & 255)
+    w = w + 1
+  }
+  return buf
+}
+
+fn rd16(buf, off) {
+  return peek(buf, off) + peek(buf, off + 1) * 256
+}
+
+fn rd32(buf, off) {
+  return peek(buf, off) + peek(buf, off + 1) * 256 + peek(buf, off + 2) * 65536 + peek(buf, off + 3) * 16777216
+}
+
+fn fat12(fat, cl) {
+  let off = cl + floor(cl / 2)
+  if cl % 2 == 0 {
+    return peek(fat, off) + (peek(fat, off + 1) & 15) * 256
+  }
+  return (peek(fat, off) >> 4) + peek(fat, off + 1) * 16
+}
+
+fn to83(name) {
+  let parts = split(name, ".")
+  let a = upper(parts[0])
+  let b = ""
+  if len(parts) > 1 {
+    b = upper(parts[1])
+  }
+  while len(a) < 8 {
+    a = a + " "
+  }
+  while len(b) < 3 {
+    b = b + " "
+  }
+  return a + b
+}
+
+fn fat_ls() {
+  let root = ata_read(198)
+  let e = 0
+  while e < 16 {
+    if peek(root, e * 32) == 0 {
+      break
+    }
+    let nm = ""
+    let k = 0
+    while k < 11 {
+      nm = nm + chr(peek(root, e * 32 + k))
+      k = k + 1
+    }
+    print nm
+    e = e + 1
+  }
+  return e
+}
+
+fn fat_read(name83) {
+  let root = ata_read(198)
+  let fat = ata_read(194)
+  let e = 0
+  while e < 16 {
+    if peek(root, e * 32) == 0 {
+      break
+    }
+    let nm = ""
+    let k = 0
+    while k < 11 {
+      nm = nm + chr(peek(root, e * 32 + k))
+      k = k + 1
+    }
+    if nm == name83 {
+      let cl = rd16(root, e * 32 + 26)
+      let sz = rd32(root, e * 32 + 28)
+      let out = bytes(sz)
+      let pos = 0
+      while cl < 4088 {
+        let sec = ata_read(197 + cl)
+        let b = 0
+        while b < 512 {
+          if pos < sz {
+            poke(out, pos, peek(sec, b))
+            pos = pos + 1
+          }
+          b = b + 1
+        }
+        cl = fat12(fat, cl)
+      }
+      return out
+    }
+    e = e + 1
+  }
+  fail("not found")
+}
+
+fn vga_put(r, c, ch, attr) {
+  let off = 753664 + (r * 80 + c) * 2
+  let a = off - off % 4
+  let v = peek32(a)
+  let sh = (off - a) * 8
+  poke32(a, setbits(v, sh + 15, sh, ch + attr * 256))
+}
+
+fn vga_clear(attr) {
+  let i = 0
+  while i < 500 {
+    poke32(753664 + i * 4, 2097184 + attr * 16777472)
+    i = i + 1
+  }
+}
+
+fn vga_scroll() {
+  let r = 0
+  while r < 24 {
+    let i = 0
+    while i < 40 {
+      poke32(753664 + r * 160 + i * 4, peek32(753664 + (r + 1) * 160 + i * 4))
+      i = i + 1
+    }
+    r = r + 1
+  }
+  let i = 0
+  while i < 40 {
+    poke32(753664 + 24 * 160 + i * 4, 119539488)
+    i = i + 1
+  }
+}
+
+fn vga_move(r, c) {
+  let pos = r * 80 + c
+  outb(980, 14)
+  outb(981, (pos >> 8) & 255)
+  outb(980, 15)
+  outb(981, pos & 255)
+}
+
+fn vga_print(s, attr, cur) {
+  for ch in s {
+    if ord(ch) == 10 {
+      cur[1] = 0
+      cur[0] = cur[0] + 1
+    } else {
+      vga_put(cur[0], cur[1], ord(ch), attr)
+      cur[1] = cur[1] + 1
+      if cur[1] == 80 {
+        cur[1] = 0
+        cur[0] = cur[0] + 1
+      }
+    }
+    if cur[0] == 25 {
+      vga_scroll()
+      cur[0] = 24
+    }
+  }
+  vga_move(cur[0], cur[1])
+  return cur
+}
+
+fn readline(cur) {
+  let line = ""
+  while true {
+    let k = key()
+    if k != -1 {
+      if k == 10 {
+        vga_print(chr(10), 7, cur)
+        return line
+      } else {
+        if k == 8 {
+          if len(line) > 0 {
+            line = substr(line, 0, len(line) - 1)
+            cur[1] = cur[1] - 1
+            if cur[1] < 0 {
+              cur[1] = 0
+            } else {
+              vga_put(cur[0], cur[1], 32, 7)
+              vga_move(cur[0], cur[1])
+            }
+          }
+        } else {
+          line = line + chr(k)
+          vga_print(chr(k), 7, cur)
+        }
+      }
+    }
+  }
+}
+
+# PIC: keyboard only (timer masked); IDT: keyboard + faults
+outb(32, 17)
+outb(160, 17)
+outb(33, 32)
+outb(161, 40)
+outb(33, 4)
+outb(161, 2)
+outb(33, 1)
+outb(161, 1)
+outb(33, 253)
+outb(161, 255)
+idt_set(33, irq1_addr(), 8, 142)
+let v = 0
+while v < 32 {
+  idt_set(v, fault_addr(v), 8, 142)
+  v = v + 1
+}
+idt_load()
+sti()
+vga_clear(7)
+let cur = [0, 0]
+vga_print("c4plus shell 0.4.0", 15, cur)
+vga_print(chr(10), 7, cur)
+print "shell on"
+while true {
+  vga_print("c4> ", 10, cur)
+  let line = readline(cur)
+  print ("got [" + line + "]")
+  let parts = split(line, " ")
+  let cmd = parts[0]
+  if cmd == "help" {
+    vga_print("help ls cat clear ver poweroff", 7, cur)
+    vga_print(chr(10), 7, cur)
+    print "help ok"
+  } elif cmd == "ls" {
+    fat_ls()
+    print "ls ok"
+  } elif cmd == "cat" {
+    if len(parts) > 1 {
+      let data = fat_read(to83(parts[1]))
+      let s = ""
+      let i = 0
+      while i < len(data) {
+        s = s + chr(peek(data, i))
+        i = i + 1
+      }
+      vga_print(s, 7, cur)
+      print "cat ok"
+    } else {
+      vga_print("usage: cat file", 7, cur)
+      vga_print(chr(10), 7, cur)
+    }
+  } elif cmd == "clear" {
+    vga_clear(7)
+    cur[0] = 0
+    cur[1] = 0
+  } elif cmd == "ver" {
+    vga_print("c4plus 0.4.0 shell", 7, cur)
+    vga_print(chr(10), 7, cur)
+    print "ver ok"
+  } elif cmd == "poweroff" {
+    print "bye"
+    exit(0)
+  } else {
+    if len(line) > 0 {
+      vga_print("unknown cmd", 7, cur)
+      vga_print(chr(10), 7, cur)
+    }
+  }
+}
