@@ -9,7 +9,7 @@
 #   objcopy -O binary vga.pe vga.bin
 #   ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
 #   objcopy -O binary -j .boot boot.pe boot.bin
-#   cat boot.bin vga.bin > vdisk.img   (pad kernel area to 64K)
+#   cat boot.bin vga.bin > vdisk.img   (pad kernel area to 96K)
 #   qemu-system-i386 -drive format=raw,file=vdisk.img -display none ^
 #     -debugcon file:zig-out/v.log -device isa-debug-exit,iobase=0xf4,iosize=0x04
 # Expect: screen writes verified by readback over serial (run with a display

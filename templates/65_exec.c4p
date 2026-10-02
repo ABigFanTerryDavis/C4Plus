@@ -1,22 +1,22 @@
-# 64_shell — interactive kernel shell: ls/cat/clear/help/ver/poweroff.
-# Keyboard line input, VGA console, FAT12 files. No paging, no timer.
-# Build (same shape as 61_ata):
-#   c4c --emit-c 64_shell.c4p --freestanding -o sh.c
-#   gcc -m32 -ffreestanding -nostdlib -c -o sh.o sh.c -I rt
+# 65_exec — run ELF programs from the FAT volume: shell, ring-3 tasks.
+# Build (same shape as 64_shell, plus userblob for the linked-in copy):
+#   c4c --emit-c 65_exec.c4p --freestanding -o ex.c
+#   gcc -m32 -ffreestanding -nostdlib -c -o ex.o ex.c -I rt
 #   gcc -m32 -ffreestanding -nostdlib -c -o fs.o rt/c4rt_fs.c
 #   as --32 rt/irq.s -o irq.o
 #   as --32 boot/boot.s -o boot.o
-#   ld -m i386pe -T boot/linkflat.ld -o sh.pe sh.o fs.o irq.o
-#   objcopy -O binary sh.pe sh.bin
+#   ld -m i386pe -T boot/linkflat.ld -o ex.pe ex.o fs.o irq.o
+#   objcopy -O binary ex.pe ex.bin
 #   ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
 #   objcopy -O binary -j .boot boot.pe boot.bin
-#   cat boot.bin sh.bin(pad 96K) fat12.bin > shdisk.img  (fat base LBA 193;
+#   cat boot.bin ex.bin(pad 96K) fat12.bin > xdisk.img  (fat base LBA 193;
 #     build fat12.bin with: python user/mkfat.py zig-out/fat12.bin user/hello.txt zig-out/user2.elf)
-#   qemu-system-i386 -drive format=raw,file=shdisk.img -display none ^
-#     -debugcon file:zig-out/sh.log -device isa-debug-exit,iobase=0xf4,iosize=0x04 ^
-#     -monitor stdio
-# Then type: help, ls, cat hello.txt, ver, poweroff (or sendkey h-e-l-p ret ...).
-# Expect echoed lines, file text, qemu exit = (code<<1)|1 on poweroff.
+#   qemu-system-i386 -drive format=raw,file=xdisk.img -display none ^
+#     -debugcon file:zig-out/x.log -device isa-debug-exit,iobase=0xf4,iosize=0x04 ^
+#     -monitor tcp:127.0.0.1:4445,server,nowait
+# Then type: run pong.elf (wait for got 1..5), ls, poweroff.
+# Expect the task's output, `done`, the shell prompt again,
+# qemu exit = (code<<1)|1 on poweroff.
 
 fn ata_wait() {
   let t = 0
@@ -218,7 +218,31 @@ fn vga_print(s, attr, cur) {
 # invisible on real hardware and with TB chaining off). Inline spins with
 # bounded conditions are solid. See DOCS "QEMU notes".
 
-# PIC: keyboard only (timer masked); IDT: keyboard + faults
+gdt_set(1, 0, 4294967295, 154, 207)
+gdt_set(2, 0, 4294967295, 146, 207)
+gdt_set(3, 0, 4294967295, 250, 207)
+gdt_set(4, 0, 4294967295, 242, 207)
+gdt_load()
+tss(589824)
+
+poke32(524288, 528387)
+poke32(524292, 532487)
+poke32(524296, 536583)
+let i = 0
+while i < 1024 {
+  poke32(528384 + i * 4, i * 4096 + 3)
+  i = i + 1
+}
+let j = 0
+while j < 1024 {
+  poke32(532480 + j * 4, 4194304 + j * 4096 + 7)
+  poke32(536576 + j * 4, 8388608 + j * 4096 + 7)
+  j = j + 1
+}
+cr3(524288)
+pg_on()
+print "exec paging on"
+
 outb(32, 17)
 outb(160, 17)
 outb(33, 32)
@@ -227,9 +251,15 @@ outb(33, 4)
 outb(161, 2)
 outb(33, 1)
 outb(161, 1)
-outb(33, 253)
+outb(33, 252)
 outb(161, 255)
+outb(67, 52)
+outb(64, 155)
+outb(64, 46)
+
+idt_set(32, irq_addr(), 8, 142)
 idt_set(33, irq1_addr(), 8, 142)
+idt_set(128, syscall_addr(), 8, 238)
 let v = 0
 while v < 32 {
   idt_set(v, fault_addr(v), 8, 142)
@@ -239,7 +269,7 @@ idt_load()
 sti()
 vga_clear(7)
 let cur = [0, 0]
-vga_print("c4plus shell 0.4.0", 15, cur)
+vga_print("c4plus exec shell 0.4.0", 15, cur)
 vga_print(chr(10), 7, cur)
 print "shell on"
 while true {
@@ -247,6 +277,7 @@ while true {
   let line = ""
   let gotline = 0
   while gotline == 0 {
+    idle()
     let k = key()
     if k != -1 {
       if k == 10 {
@@ -271,11 +302,15 @@ while true {
       }
     }
   }
+  # sacrificial print: under QEMU TCG the first statement after this loop
+  # exit is occasionally skipped (see DOCS "QEMU notes"); a harmless blank
+  # absorbs it so real output never goes missing.
+  print ""
   print ("got [" + line + "]")
   let parts = split(line, " ")
   let cmd = parts[0]
   if cmd == "help" {
-    vga_print("help ls cat clear ver poweroff", 7, cur)
+    vga_print("help ls cat run clear ver poweroff", 7, cur)
     vga_print(chr(10), 7, cur)
     print "help ok"
   } elif cmd == "ls" {
@@ -285,10 +320,10 @@ while true {
     if len(parts) > 1 {
       let data = fat_read(to83(parts[1]))
       let s = ""
-      let i = 0
-      while i < len(data) {
-        s = s + chr(peek(data, i))
-        i = i + 1
+      let k = 0
+      while k < len(data) {
+        s = s + chr(peek(data, k))
+        k = k + 1
       }
       vga_print(s, 7, cur)
       print "cat ok"
@@ -296,12 +331,34 @@ while true {
       vga_print("usage: cat file", 7, cur)
       vga_print(chr(10), 7, cur)
     }
+  } elif cmd == "run" {
+    if len(parts) > 1 {
+      let data = fat_read(to83(parts[1]))
+      if peek(data, 0) == 127 and peek(data, 1) == 69 {
+        let e = elf_load(flat(data))
+        print ("entry=" + str(e))
+        let t = task_create(e, 8388608)
+        print ("task=" + str(t))
+        while tasks() > 0 {
+          idle()
+        }
+        vga_print("done", 7, cur)
+        vga_print(chr(10), 7, cur)
+        print "run ok"
+      } else {
+        vga_print("not an elf", 7, cur)
+        vga_print(chr(10), 7, cur)
+      }
+    } else {
+      vga_print("usage: run file", 7, cur)
+      vga_print(chr(10), 7, cur)
+    }
   } elif cmd == "clear" {
     vga_clear(7)
     cur[0] = 0
     cur[1] = 0
   } elif cmd == "ver" {
-    vga_print("c4plus 0.4.0 shell", 7, cur)
+    vga_print("c4plus 0.4.0 exec", 7, cur)
     vga_print(chr(10), 7, cur)
     print "ver ok"
   } elif cmd == "poweroff" {

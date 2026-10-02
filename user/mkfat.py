@@ -2,7 +2,7 @@
 import struct
 import sys
 
-BASE_LBA = 129
+BASE_LBA = 193
 SECTORS = 512
 FAT_SECTORS = 2
 ROOT_ENTRIES = 16

@@ -427,6 +427,15 @@ strings.lines("a\nb\r\nc")              # ["a", "b", "c"]
 import http                # real HTTP(S), script-only like gui
 let r = http.get("https://example.com")  # -> {code, body, headers}
 http.post(url, body, headers)  # also put/patch/delete/head/options/request/download/redirects
+
+import vga                 # 80x25 text cells; script needs vgatogui window
+import vgatogui            # script-only VGA emulator window
+let w = vgatogui.window("vga demo", 640, 400)
+vga.clear(7)
+vga.text(0, 0, "hi vga", 15)   # also put(r,c,ch,attr)/get/move/scroll/size
+vga_put(2, 3, 66, 12)          # bare form too (this is what kernels use)
+# kernels use bare vga_* builtins with --emit-c --freestanding (same calls,
+# real 0xB8000; see templates/66_vga.c4p). No vgatogui needed on hardware.
 ```
 
 ---
@@ -657,7 +666,7 @@ ld -m i386pe -T boot/linkflat.ld -o timer.pe timer.o fs.o irq.o
 objcopy -O binary timer.pe timer.bin
 ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
 objcopy -O binary -j .boot boot.pe boot.bin
-cat boot.bin timer.bin > tdisk.img   # pad kernel area to 32K
+cat boot.bin timer.bin > tdisk.img   # pad kernel area to 96K
 qemu-system-i386 -drive format=raw,file=tdisk.img -display none `
   -debugcon file:t.log -device isa-debug-exit,iobase=0xf4,iosize=0x04
 # Expect tick prints; qemu exit = (code<<1)|1.
@@ -667,7 +676,7 @@ The moving parts:
 
 | file               | role                                                              |
 | ------------------ | ----------------------------------------------------------------- |
-| `boot/boot.s`      | stage-1 sector: loads 128 sectors to `0x10000`, enters pmode, calls `kmain` |
+| `boot/boot.s`      | stage-1 sector: loads 192 sectors to `0x10000`, enters pmode, calls `kmain` |
 | `boot/bootlink.ld` | boot-sector link script                                           |
 | `boot/linkflat.ld` | kernel link: `.text.kmain` first at `0x10000`, BSS at `0x200000`  |
 | `boot/link.ld`     | alternate kernel link                                             |
@@ -703,20 +712,19 @@ a 100Hz PIT slice, round-robin context switches in `c4_schedule`, and mailbox IP
 (send/recv syscalls). The ping-pong pair in `user/pong.s` (tid 1 sends 1..5 to tid 2, tid
 2 prints each receipt) exercises preemption, blocking receive and exit.
 
+Then storage and interaction: ATA PIO disk reads (`61_ata`, new `inw` builtin), a
+read-only FAT12 filesystem built by `user/mkfat.py` (`62_fat` — BPB, root dir, 12-bit
+cluster chains, multi-cluster files), a VGA text console at `0xB8000` with scroll and
+hardware cursor (`63_vga`), an interactive shell with `ls`/`cat`/`help`/`ver`/`poweroff`
+over keyboard line input (`64_shell`), and `run FILE` executing ELFs straight off disk
+into ring-3 tasks (`65_exec` — `flat()` flattens a file list for the ELF loader).
+
 ### Kernel meter
 
-**65%** — stage-1 loads 128 sectors to `0x10000`, enters pmode, runs `kmain`, exits via the
-debug port (QEMU exit `(code<<1)|1`); PIT timer IRQ at 100Hz (`52_timer`); PS/2 keyboard
-driver with line input (`54_keyboard`); paging with a 4MB identity map + kernel heap with
-free-list reuse (`55_paging`); `int 0x80` syscalls write/exit/ticks (`56_syscall`); GDT/IDT
-descriptors via pack/unpack (`43_gdt`); ring-3 user mode via TSS + full GDT, ELF loader +
-`enter_user`, user pages (4–12MB), DPL3 syscall gate and fault gates 0–31 (`58_usermode` —
-prints `hello from ring3`); preemptive round-robin scheduler with mailbox IPC over the PIT
-(`59_sched` — two tasks ping-pong 1..5 through rendezvous send/blocking recv, five `got N`
-lines, `all tasks done`, clean exit; per-task kernel stacks, switch tracer, ESP validation).
-
-The remaining ~35% is, roughly: exit/reap, a filesystem, more drivers, and a shell that
-ties it together.
+**80%** — everything above, plus: stage-1 loads 192 sectors to `0x10000`, per-task
+kernel stacks with eager FPU switching, switch tracer and ESP validation, rendezvous
+send + atomic receive, 1MB kernel pool. The remaining ~20% is, roughly: writable
+filesystem, more drivers (serial disk DMA, sound, network), and a fuller shell.
 
 ---
 
@@ -728,7 +736,7 @@ rt/             runtimes: c4rt.c/h (hosted), c4rt_fs.c/h (freestanding), irq.s, 
 boot/           stage-1 boot sector + linker scripts
 user/           ring-3 programs (hello.s, pong.s) + mkelf.py ELF wrapper
 examples/       small programs per feature (also used as tests)
-templates/      numbered walkthroughs 01_hello .. 60_http (+ .c4asm sidecars)
+templates/      numbered walkthroughs 01_hello .. 66_vga (+ .c4asm sidecars)
 build.zig       build definition (version lives here)
 build.zig.zon   package manifest (version mirrored here)
 DOCS.md         full language + kernel reference
@@ -737,15 +745,15 @@ zip/            local release snapshots (kept out of git; use GitHub releases)
 
 `templates/` is the guided tour: start at `01_hello.c4p` for the language, `43_gdt` →
 `44_kmain` → `52_timer` → `54_keyboard` → `55_paging` → `56_syscall` → `58_usermode` →
-`59_sched` for the kernel path. Every kernel template header documents its exact build
-recipe.
+`59_sched` → `61_ata` → `62_fat` → `63_vga` → `64_shell` → `65_exec` → `66_vga` for the
+kernel path. Every kernel template header documents its exact build recipe.
 
 ---
 
 ## Versioning
 
-The version lives in two places — `build.zig` (`const version = "0.3.9"`) and
-`build.zig.zon` (`.version = "0.3.9"`) — and each release is snapshotted as
+The version lives in two places — `build.zig` (`const version = "0.4.0"`) and
+`build.zig.zon` (`.version = "0.4.0"`) — and each release is snapshotted as
 `zip/c4plus-<version>-src.zip` (older snapshots are kept). `zip/` is local history and
 stays out of git; public releases go through GitHub releases.
 
@@ -758,9 +766,13 @@ stays out of git; public releases go through GitHub releases.
 - **0.3.8 (this):** working `59_sched` switch (the `add $4` off-by-one is gone, per-task
   kernel stacks, rendezvous send, five `got N` lines + `all tasks done`), REPL import
   persistence for every module, GUI `password` + `focus`.
-- **0.3.9 (this):** stabilization — full interp-vs-native suite green (94 files),
+- **0.3.9:** stabilization — full interp-vs-native suite green (94 files),
   task-exit mailbox hygiene, no new features. Closes the 0.3.x line.
-- After that: the big one — filesystem + drivers, shell.
+- **0.4.0 (this):** the big one — ATA PIO (`inw`), FAT12 (`user/mkfat.py`),
+  VGA console, interactive shell, `run FILE` disk exec into ring-3 tasks,
+  plus the display story (`vga_*` kernel builtins, `import vga` +
+  `import vgatogui` emulator). Kernel meter 65% → 80%.
+- After that: writable filesystem, more drivers, fuller shell.
 
 ---
 

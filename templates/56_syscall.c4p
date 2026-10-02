@@ -9,7 +9,7 @@
 #   objcopy -O binary sys.pe sys.bin
 #   ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
 #   objcopy -O binary -j .boot boot.pe boot.bin
-#   cat boot.bin sys.bin > sdisk.img   (pad kernel area to 64K)
+#   cat boot.bin sys.bin > sdisk.img   (pad kernel area to 96K)
 #   qemu-system-i386 -drive format=raw,file=sdisk.img -display none ^
 #     -debugcon file:zig-out/s.log -device isa-debug-exit,iobase=0xf4,iosize=0x04
 # Syscalls: 1 = write(addr, len), 2 = exit(code), 3 = ticks.

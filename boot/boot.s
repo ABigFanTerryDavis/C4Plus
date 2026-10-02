@@ -13,14 +13,14 @@ _bootmain:
     sti
     mov $0x41, %al
     out %al, $0xE9
-    /* load 128 sectors via int13 EDD (LBA 1..128) to 0x10000; DL = BIOS drive.
+    /* load 192 sectors via int13 EDD (LBA 1..192) to 0x10000; DL = BIOS drive.
        0x10000 (seg 0x1000) is clear of the boot sector, stack, and DAP.
-       128 sectors = 64KB, room for kernel + slack (keep kernel bins padded
-       to 64K and anything after (e.g. a FAT volume) at LBA 160+). */
+       192 sectors = 96KB, room for kernel + slack (keep kernel bins padded
+       to 96K and anything after (e.g. a FAT volume) at LBA 193+). */
     mov %dl, boot_drive
     movw $0, counter
 load_loop:
-    cmpw $0x80, counter
+    cmpw $0xC0, counter
     jge loaded
     /* BIOS may clobber DS/ES/DL and the stack: reload them every iteration,
        keep the counter in memory (never on the stack) */
@@ -34,9 +34,16 @@ load_loop:
     mov %eax, 0x7E00 + 8
     movl $0, 0x7E00 + 12
     mov %esi, %eax
-    shl $9, %eax
-    mov %ax, 0x7E00 + 4
-    movw $0x1000, 0x7E00 + 6
+    /* dest = 0x10000 + counter*512 via seg:off (16-bit offset wraps at
+       64K, so advance the segment every 128 sectors). */
+    mov %esi, %ebx
+    shr $7, %ebx
+    shl $12, %ebx
+    add $0x1000, %ebx
+    mov %bx, 0x7E00 + 6
+    and $0x7F, %esi
+    shl $9, %esi
+    mov %si, 0x7E00 + 4
     movw $0x0010, 0x7E00
     movw $1, 0x7E00 + 2
     mov $0x42, %ah

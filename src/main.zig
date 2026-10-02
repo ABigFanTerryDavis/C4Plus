@@ -651,6 +651,8 @@ fn replMain(io: Io, arena: std.mem.Allocator, envmap: ?*const std.process.Enviro
         sub.imported_strings = repl_strings;
         sub.imported_http = repl_http;
         sub.http_redirects = repl_http_redir;
+        sub.imported_vga = repl_vga;
+        sub.imported_vgatogui = repl_vgatogui;
         sub.run() catch |err| {
             stdout.flush() catch {};
             if (err == ParseError.ExitSignal) {
@@ -683,6 +685,8 @@ fn replMain(io: Io, arena: std.mem.Allocator, envmap: ?*const std.process.Enviro
         repl_strings = sub.imported_strings;
         repl_http = sub.imported_http;
         repl_http_redir = sub.http_redirects;
+        repl_vga = sub.imported_vga;
+        repl_vgatogui = sub.imported_vgatogui;
         try stdout.flush();
     }
     try stdout.flush();
@@ -700,6 +704,89 @@ var repl_random: bool = false;
 var repl_strings: bool = false;
 var repl_http: bool = false;
 var repl_http_redir: u16 = 3;
+var repl_vga: bool = false;
+var repl_vgatogui: bool = false;
+
+const vgaCols: usize = 80;
+const vgaRows: usize = 25;
+var vga_win: ?*gui.Window = null;
+var vga_cells: [vgaCols * vgaRows]u16 = [_]u16{0x0720} ** (vgaCols * vgaRows);
+var vga_cur_r: i32 = 0;
+var vga_cur_c: i32 = 0;
+
+fn vgaPal(i: u8) gui.Color {
+    return switch (i) {
+        0 => 0xFF000000,
+        1 => 0xFF0000AA,
+        2 => 0xFF00AA00,
+        3 => 0xFF00AAAA,
+        4 => 0xFFAA0000,
+        5 => 0xFFAA00AA,
+        6 => 0xFFAA5500,
+        7 => 0xFFAAAAAA,
+        8 => 0xFF555555,
+        9 => 0xFF5555FF,
+        10 => 0xFF55FF55,
+        11 => 0xFF55FFFF,
+        12 => 0xFFFF5555,
+        13 => 0xFFFF55FF,
+        14 => 0xFFFFFF55,
+        else => 0xFFFFFFFF,
+    };
+}
+
+fn vgaRender() void {
+    const win = vga_win orelse return;
+    if (!gui.isAlive(win)) return;
+    const cw: i32 = @max(4, @divTrunc(win.cw, 80));
+    const chh: i32 = @max(8, @divTrunc(win.ch, 25));
+    const fsize: i32 = @max(8, chh - 2);
+    for (0..vgaRows) |r| {
+        for (0..vgaCols) |c| {
+            const cell = vga_cells[r * vgaCols + c];
+            const ch: u8 = @truncate(cell);
+            const attr: u8 = @truncate(cell >> 8);
+            const x: i32 = @intCast(c * @as(usize, @intCast(cw)));
+            const y: i32 = @intCast(r * @as(usize, @intCast(chh)));
+            const bg = vgaPal((attr >> 4) & 7);
+            if (bg != 0xFF000000) gui.pushRect(win, x, y, cw, chh, bg, false, 0);
+            var sbuf: [1]u8 = .{' '};
+            if (ch >= 32) sbuf[0] = ch;
+            gui.pushText(win, x, y, &sbuf, vgaPal(attr & 15), fsize);
+        }
+    }
+    gui.pushRect(win, vga_cur_c * cw, vga_cur_r * chh + chh - 2, cw, 2, 0xFFFFFFFF, false, 0);
+    gui.redraw(win);
+}
+
+fn vgaPutCell(r: usize, c: usize, ch: u8, attr: u8) void {
+    vga_cells[r * vgaCols + c] = @as(u16, ch) | (@as(u16, attr) << 8);
+}
+
+fn vgaTextAt(r: usize, c: usize, s: []const u8, attr: u8) void {
+    var rr = r;
+    var cc = c;
+    for (s) |b| {
+        if (b == '\n') {
+            cc = 0;
+            rr += 1;
+            if (rr >= vgaRows) return;
+            continue;
+        }
+        vgaPutCell(rr, cc, b, attr);
+        cc += 1;
+        if (cc >= vgaCols) {
+            cc = 0;
+            rr += 1;
+            if (rr >= vgaRows) return;
+        }
+    }
+}
+
+fn vgaScrollCells() void {
+    std.mem.copyForwards(u16, vga_cells[0 .. vgaCols * (vgaRows - 1)], vga_cells[vgaCols ..]);
+    for (vga_cells[vgaCols * (vgaRows - 1) ..]) |*cell| cell.* = 0x0720;
+}
 
 fn replBlank(chunk: []const u8) bool {
     var i: usize = 0;
@@ -1348,6 +1435,8 @@ const Parser = struct {
     imported_random: bool = false,
     imported_strings: bool = false,
     imported_http: bool = false,
+    imported_vga: bool = false,
+    imported_vgatogui: bool = false,
     http_redirects: u16 = 3,
     gui_cbs: ?*std.ArrayList(Value) = null,
     envmap: ?*const std.process.Environ.Map = null,
@@ -1425,6 +1514,8 @@ const Parser = struct {
             .imported_random = self.imported_random,
             .imported_strings = self.imported_strings,
             .imported_http = self.imported_http,
+            .imported_vga = self.imported_vga,
+            .imported_vgatogui = self.imported_vgatogui,
             .http_redirects = self.http_redirects,
             .gui_cbs = self.gui_cbs,
             .imported_cpu = self.imported_cpu,
@@ -1475,6 +1566,8 @@ const Parser = struct {
             .imported_random = self.imported_random,
             .imported_strings = self.imported_strings,
             .imported_http = self.imported_http,
+            .imported_vga = self.imported_vga,
+            .imported_vgatogui = self.imported_vgatogui,
             .http_redirects = self.http_redirects,
             .gui_cbs = self.gui_cbs,
             .imported_cpu = self.imported_cpu,
@@ -1637,8 +1730,12 @@ const Parser = struct {
                     }
                 } else if (std.mem.eql(u8, mod, "http")) {
                     self.imported_http = true;
+                } else if (std.mem.eql(u8, mod, "vga")) {
+                    self.imported_vga = true;
+                } else if (std.mem.eql(u8, mod, "vgatogui")) {
+                    self.imported_vgatogui = true;
                 } else {
-                    if (!self.mute)                     std.debug.print("{s}:{d}: unknown module '{s}' (only 'os'/'physics'/'json'/'time'/'heap'/'cpu'/'hex'/'random'/'strings'/'gui'/'http' or \"file.c4h\")\n", .{ self.file, self.line, mod });
+                    if (!self.mute)                     std.debug.print("{s}:{d}: unknown module '{s}' (only 'os'/'physics'/'json'/'time'/'heap'/'cpu'/'hex'/'random'/'strings'/'gui'/'http'/'vga'/'vgatogui' or \"file.c4h\")\n", .{ self.file, self.line, mod });
                     return ParseError.UnknownKeyword;
                 }
             }
@@ -2401,6 +2498,8 @@ const Parser = struct {
             .imported_random = self.imported_random,
             .imported_strings = self.imported_strings,
             .imported_http = self.imported_http,
+            .imported_vga = self.imported_vga,
+            .imported_vgatogui = self.imported_vgatogui,
             .http_redirects = self.http_redirects,
             .gui_cbs = self.gui_cbs,
             .imported_cpu = self.imported_cpu,
@@ -2438,6 +2537,8 @@ const Parser = struct {
         if (sub.imported_random) self.imported_random = sub.imported_random or self.imported_random;
         if (sub.imported_strings) self.imported_strings = sub.imported_strings or self.imported_strings;
         if (sub.imported_http) self.imported_http = sub.imported_http or self.imported_http;
+        if (sub.imported_vga) self.imported_vga = sub.imported_vga or self.imported_vga;
+        if (sub.imported_vgatogui) self.imported_vgatogui = sub.imported_vgatogui or self.imported_vgatogui;
         self.http_redirects = sub.http_redirects;
     }
 
@@ -2565,6 +2666,8 @@ const Parser = struct {
             .imported_random = self.imported_random,
             .imported_strings = self.imported_strings,
             .imported_http = self.imported_http,
+            .imported_vga = self.imported_vga,
+            .imported_vgatogui = self.imported_vgatogui,
             .http_redirects = self.http_redirects,
             .gui_cbs = self.gui_cbs,
             .imported_cpu = self.imported_cpu,
@@ -2749,6 +2852,12 @@ const Parser = struct {
         }
         if (std.mem.eql(u8, module, "http")) {
             return try self.callHttpMethod(method, arg_vals);
+        }
+        if (std.mem.eql(u8, module, "vga")) {
+            return try self.callVgaMethod(method, arg_vals);
+        }
+        if (std.mem.eql(u8, module, "vgatogui")) {
+            return try self.callVgatoguiMethod(method, arg_vals);
         }
         if (!std.mem.eql(u8, module, "os")) {
             if (!self.mute) std.debug.print("error on line {d}: unknown module '{s}'\n", .{ self.line, module });
@@ -4102,6 +4211,147 @@ const Parser = struct {
             return Value{ .dict = d };
         }
         return try self.httpDo(hm, url, payload, headers, want_body);
+    }
+
+    fn vgaFail(self: *Parser, comptime fmt: []const u8, args: anytype) anyerror {
+        const msg = try std.fmt.allocPrint(self.alloc, fmt, args);
+        if (self.err) |e| e.fail_msg = msg;
+        return ParseError.FailSignal;
+    }
+
+    fn vgaLive(self: *Parser) anyerror!*gui.Window {
+        if (self.dry) return gui.dryWindow();
+        const win = vga_win orelse {
+            return self.vgaFail("vga needs an open vgatogui.window first", .{});
+        };
+        if (!gui.isAlive(win)) {
+            return self.vgaFail("vga window was closed", .{});
+        }
+        return win;
+    }
+
+    fn vgaInt(self: *Parser, arg_vals: []const Value, i: usize, lo: i32, hi: i32) anyerror!i32 {
+        if (i >= arg_vals.len or arg_vals[i] != .number) return ParseError.TypeError;
+        const n = arg_vals[i].number;
+        if (n != @trunc(n) or n < @as(f64, @floatFromInt(lo)) or n > @as(f64, @floatFromInt(hi))) {
+            if (!self.mute) std.debug.print("error on line {d}: vga arg {d} needs {d}..{d}\n", .{ self.line, i, lo, hi });
+            return ParseError.TypeError;
+        }
+        return @intFromFloat(n);
+    }
+
+    fn vgaSizeVal(self: *Parser) anyerror!Value {
+        const obj = try self.alloc.create(ListObj);
+        obj.* = .{ .items = .empty };
+        try obj.items.append(self.alloc, Value{ .number = 80 });
+        try obj.items.append(self.alloc, Value{ .number = 25 });
+        return Value{ .list = obj };
+    }
+
+    fn callVgaMethod(self: *Parser, method: []const u8, arg_vals: []const Value) anyerror!Value {
+        if (!self.imported_vga) {
+            if (!self.mute) std.debug.print("error on line {d}: 'vga' used without 'import vga'\n", .{self.line});
+            return ParseError.UnknownKeyword;
+        }
+        if (std.mem.eql(u8, method, "clear")) {
+            if (arg_vals.len != 1) return ParseError.ArityMismatch;
+            const a = try self.vgaInt(arg_vals, 0, 0, 255);
+            if (self.dry) return Value{ .nil = {} };
+            _ = try self.vgaLive();
+            const cell: u16 = @as(u16, @intCast(a)) * 256 + 0x20;
+            for (&vga_cells) |*cl| cl.* = cell;
+            vga_cur_r = 0;
+            vga_cur_c = 0;
+            vgaRender();
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, method, "put")) {
+            if (arg_vals.len != 4) return ParseError.ArityMismatch;
+            const r = try self.vgaInt(arg_vals, 0, 0, 24);
+            const c = try self.vgaInt(arg_vals, 1, 0, 79);
+            const ch = try self.vgaInt(arg_vals, 2, 0, 255);
+            const a = try self.vgaInt(arg_vals, 3, 0, 255);
+            if (self.dry) return Value{ .nil = {} };
+            _ = try self.vgaLive();
+            vgaPutCell(@intCast(r), @intCast(c), @intCast(ch), @intCast(a));
+            vgaRender();
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, method, "get")) {
+            if (arg_vals.len != 2) return ParseError.ArityMismatch;
+            const r = try self.vgaInt(arg_vals, 0, 0, 24);
+            const c = try self.vgaInt(arg_vals, 1, 0, 79);
+            if (self.dry) return Value{ .number = 0 };
+            _ = try self.vgaLive();
+            return Value{ .number = @floatFromInt(vga_cells[@as(usize, @intCast(r)) * vgaCols + @as(usize, @intCast(c))]) };
+        }
+        if (std.mem.eql(u8, method, "text")) {
+            if (arg_vals.len != 4) return ParseError.ArityMismatch;
+            const r = try self.vgaInt(arg_vals, 0, 0, 24);
+            const c = try self.vgaInt(arg_vals, 1, 0, 79);
+            if (arg_vals[2] != .string) return ParseError.TypeError;
+            const a = try self.vgaInt(arg_vals, 3, 0, 255);
+            if (self.dry) return Value{ .nil = {} };
+            _ = try self.vgaLive();
+            vgaTextAt(@intCast(r), @intCast(c), arg_vals[2].string, @intCast(a));
+            vgaRender();
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, method, "scroll")) {
+            if (arg_vals.len != 0) return ParseError.ArityMismatch;
+            if (self.dry) return Value{ .nil = {} };
+            _ = try self.vgaLive();
+            vgaScrollCells();
+            vgaRender();
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, method, "move")) {
+            if (arg_vals.len != 2) return ParseError.ArityMismatch;
+            const r = try self.vgaInt(arg_vals, 0, 0, 24);
+            const c = try self.vgaInt(arg_vals, 1, 0, 79);
+            if (self.dry) return Value{ .nil = {} };
+            _ = try self.vgaLive();
+            vga_cur_r = r;
+            vga_cur_c = c;
+            vgaRender();
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, method, "size")) {
+            if (arg_vals.len != 0) return ParseError.ArityMismatch;
+            return try self.vgaSizeVal();
+        }
+        if (!self.mute) std.debug.print("error on line {d}: unknown vga.{s} (have clear/put/get/text/scroll/move/size)\n", .{ self.line, method });
+        return ParseError.UnknownFunction;
+    }
+
+    fn callVgatoguiMethod(self: *Parser, method: []const u8, arg_vals: []const Value) anyerror!Value {
+        if (!self.imported_vgatogui) {
+            if (!self.mute) std.debug.print("error on line {d}: 'vgatogui' used without 'import vgatogui'\n", .{self.line});
+            return ParseError.UnknownKeyword;
+        }
+        if (std.mem.eql(u8, method, "window")) {
+            if (arg_vals.len != 3) return ParseError.ArityMismatch;
+            const title = try self.valueToString(arg_vals[0]);
+            const w = guiInt(arg_vals, 1) orelse 640;
+            const h = guiInt(arg_vals, 2) orelse 400;
+            if (self.dry) return Value{ .number = 1 };
+            if (!gui.supported) {
+                if (!self.mute) std.debug.print("error on line {d}: vgatogui needs Windows (this build is {s})\n", .{ self.line, @tagName(@import("builtin").os.tag) });
+                return ParseError.UnknownKeyword;
+            }
+            const win = gui.createWindow(self.alloc, title, w, h) catch {
+                if (!self.mute) std.debug.print("error on line {d}: could not create window (Win32 failed)\n", .{self.line});
+                return ParseError.UnknownFunction;
+            };
+            vga_win = win;
+            for (&vga_cells) |*cl| cl.* = 0x0720;
+            vga_cur_r = 0;
+            vga_cur_c = 0;
+            vgaRender();
+            return Value{ .number = @floatFromInt(win.slot + 1) };
+        }
+        if (!self.mute) std.debug.print("error on line {d}: unknown vgatogui.{s} (have window)\n", .{ self.line, method });
+        return ParseError.UnknownFunction;
     }
 
     fn callGuiMethod(self: *Parser, method: []const u8, arg_vals: []const Value) anyerror!Value {
@@ -6092,6 +6342,73 @@ const JsonParser = struct {
             arg_vals[0].list.items.items[i] = arg_vals[2];
             return arg_vals[2];
         }
+        if (std.mem.eql(u8, name, "vga_clear")) {
+            if (arg_vals.len != 1) return ParseError.ArityMismatch;
+            const a = try self.vgaInt(arg_vals, 0, 0, 255);
+            if (self.dry) return Value{ .nil = {} };
+            _ = try self.vgaLive();
+            const cell: u16 = @as(u16, @intCast(a)) * 256 + 0x20;
+            for (&vga_cells) |*cl| cl.* = cell;
+            vga_cur_r = 0;
+            vga_cur_c = 0;
+            vgaRender();
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, name, "vga_put")) {
+            if (arg_vals.len != 4) return ParseError.ArityMismatch;
+            const r = try self.vgaInt(arg_vals, 0, 0, 24);
+            const c = try self.vgaInt(arg_vals, 1, 0, 79);
+            const ch = try self.vgaInt(arg_vals, 2, 0, 255);
+            const a = try self.vgaInt(arg_vals, 3, 0, 255);
+            if (self.dry) return Value{ .nil = {} };
+            _ = try self.vgaLive();
+            vgaPutCell(@intCast(r), @intCast(c), @intCast(ch), @intCast(a));
+            vgaRender();
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, name, "vga_get")) {
+            if (arg_vals.len != 2) return ParseError.ArityMismatch;
+            const r = try self.vgaInt(arg_vals, 0, 0, 24);
+            const c = try self.vgaInt(arg_vals, 1, 0, 79);
+            if (self.dry) return Value{ .number = 0 };
+            _ = try self.vgaLive();
+            return Value{ .number = @floatFromInt(vga_cells[@as(usize, @intCast(r)) * vgaCols + @as(usize, @intCast(c))]) };
+        }
+        if (std.mem.eql(u8, name, "vga_text")) {
+            if (arg_vals.len != 4) return ParseError.ArityMismatch;
+            const r = try self.vgaInt(arg_vals, 0, 0, 24);
+            const c = try self.vgaInt(arg_vals, 1, 0, 79);
+            if (arg_vals[2] != .string) return ParseError.TypeError;
+            const a = try self.vgaInt(arg_vals, 3, 0, 255);
+            if (self.dry) return Value{ .nil = {} };
+            _ = try self.vgaLive();
+            vgaTextAt(@intCast(r), @intCast(c), arg_vals[2].string, @intCast(a));
+            vgaRender();
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, name, "vga_scroll")) {
+            if (arg_vals.len != 0) return ParseError.ArityMismatch;
+            if (self.dry) return Value{ .nil = {} };
+            _ = try self.vgaLive();
+            vgaScrollCells();
+            vgaRender();
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, name, "vga_move")) {
+            if (arg_vals.len != 2) return ParseError.ArityMismatch;
+            const r = try self.vgaInt(arg_vals, 0, 0, 24);
+            const c = try self.vgaInt(arg_vals, 1, 0, 79);
+            if (self.dry) return Value{ .nil = {} };
+            _ = try self.vgaLive();
+            vga_cur_r = r;
+            vga_cur_c = c;
+            vgaRender();
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, name, "vga_size")) {
+            if (arg_vals.len != 0) return ParseError.ArityMismatch;
+            return try self.vgaSizeVal();
+        }
         if (std.mem.eql(u8, name, "u8")) {
             if (arg_vals.len != 1) return ParseError.ArityMismatch;
             return Value{ .number = try self.wrapInt(arg_vals[0], 8, false) };
@@ -6188,7 +6505,8 @@ const JsonParser = struct {
             std.mem.eql(u8, name, "user_base") or std.mem.eql(u8, name, "user_len") or
             std.mem.eql(u8, name, "user2_base") or std.mem.eql(u8, name, "user2_len") or
             std.mem.eql(u8, name, "fault_addr") or std.mem.eql(u8, name, "task_create") or
-            std.mem.eql(u8, name, "tasks") or std.mem.eql(u8, name, "idle"))
+            std.mem.eql(u8, name, "tasks") or std.mem.eql(u8, name, "idle") or
+            std.mem.eql(u8, name, "flat"))
         {
             if (!self.mute) std.debug.print("error on line {d}: '{s}()' only works in freestanding kernels (--emit-c --freestanding)\n", .{ self.line, name });
             return ParseError.UnknownFunction;
@@ -6249,6 +6567,8 @@ const JsonParser = struct {
             .imported_random = self.imported_random,
             .imported_strings = self.imported_strings,
             .imported_http = self.imported_http,
+            .imported_vga = self.imported_vga,
+            .imported_vgatogui = self.imported_vgatogui,
             .http_redirects = self.http_redirects,
             .gui_cbs = self.gui_cbs,
             .imported_cpu = self.imported_cpu,

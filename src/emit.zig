@@ -1598,6 +1598,12 @@ pub const Emitter = struct {
         if (std.mem.eql(u8, mod, "http")) {
             return self.fail("'http' is script-only (network); run it with c4c, not --emit-c", .{});
         }
+        if (std.mem.eql(u8, mod, "vgatogui")) {
+            return self.fail("'vgatogui' is script-only (VGA emulator window); run it with c4c, not --emit-c", .{});
+        }
+        if (std.mem.eql(u8, mod, "vga")) {
+            return self.fail("'vga' module is script-only (needs vgatogui); kernels use bare vga_* builtins with --emit-c --freestanding", .{});
+        }
         if (std.mem.eql(u8, mod, "proc") or std.mem.eql(u8, mod, "os_exec")) {
             return self.fail("process spawn is script-only; run it with c4c, not --emit-c", .{});
         }
@@ -2074,6 +2080,34 @@ pub const Emitter = struct {
                 if (args.len != 1) return self.fail("peek32(addr) takes 1 arg", .{});
                 return try std.fmt.allocPrint(self.alloc, "c4_peek32({s})", .{args[0]});
             }
+            if (std.mem.eql(u8, name, "vga_clear")) {
+                if (args.len != 1) return self.fail("vga_clear(attr) takes 1 arg", .{});
+                return try std.fmt.allocPrint(self.alloc, "c4_vga_clear({s})", .{args[0]});
+            }
+            if (std.mem.eql(u8, name, "vga_put")) {
+                if (args.len != 4) return self.fail("vga_put(r, c, ch, attr) takes 4 args", .{});
+                return try std.fmt.allocPrint(self.alloc, "c4_vga_put({s}, {s}, {s}, {s})", .{ args[0], args[1], args[2], args[3] });
+            }
+            if (std.mem.eql(u8, name, "vga_get")) {
+                if (args.len != 2) return self.fail("vga_get(r, c) takes 2 args", .{});
+                return try std.fmt.allocPrint(self.alloc, "c4_vga_get({s}, {s})", .{ args[0], args[1] });
+            }
+            if (std.mem.eql(u8, name, "vga_text")) {
+                if (args.len != 4) return self.fail("vga_text(r, c, s, attr) takes 4 args", .{});
+                return try std.fmt.allocPrint(self.alloc, "c4_vga_text({s}, {s}, {s}, {s})", .{ args[0], args[1], args[2], args[3] });
+            }
+            if (std.mem.eql(u8, name, "vga_scroll")) {
+                if (args.len != 0) return self.fail("'vga_scroll' takes no args", .{});
+                return try self.alloc.dupe(u8, "c4_vga_scroll()");
+            }
+            if (std.mem.eql(u8, name, "vga_move")) {
+                if (args.len != 2) return self.fail("vga_move(r, c) takes 2 args", .{});
+                return try std.fmt.allocPrint(self.alloc, "c4_vga_move({s}, {s})", .{ args[0], args[1] });
+            }
+            if (std.mem.eql(u8, name, "vga_size")) {
+                if (args.len != 0) return self.fail("'vga_size' takes no args", .{});
+                return try self.alloc.dupe(u8, "c4_vga_size()");
+            }
             if (std.mem.eql(u8, name, "cr3")) {
                 if (args.len != 1) return self.fail("cr3(addr) takes 1 arg", .{});
                 return try std.fmt.allocPrint(self.alloc, "c4_cr3({s})", .{args[0]});
@@ -2154,8 +2188,12 @@ pub const Emitter = struct {
                 if (args.len != 0) return self.fail("'idle' takes no args", .{});
                 return try self.alloc.dupe(u8, "c4_idle()");
             }
+            if (std.mem.eql(u8, name, "flat")) {
+                if (args.len != 1) return self.fail("flat(list) takes 1 arg", .{});
+                return try std.fmt.allocPrint(self.alloc, "c4_flat({s})", .{args[0]});
+            }
         } else {
-            const fsonly = [_][]const u8{ "outb", "inb", "inw", "sti", "cli", "ticks", "irq_addr", "idt_set", "idt_load", "key", "irq1_addr", "poke32", "peek32", "cr3", "pg_on", "kmalloc", "kfree", "syscall", "syscall_addr", "addr", "gdt_set", "gdt_load", "tss", "enter_user", "elf_load", "user_base", "user_len", "user2_base", "user2_len", "fault_addr", "task_create", "tasks", "idle" };
+            const fsonly = [_][]const u8{ "outb", "inb", "inw", "sti", "cli", "ticks", "irq_addr", "idt_set", "idt_load", "key", "irq1_addr", "poke32", "peek32", "vga_clear", "vga_put", "vga_get", "vga_text", "vga_scroll", "vga_move", "vga_size", "cr3", "pg_on", "kmalloc", "kfree", "syscall", "syscall_addr", "addr", "gdt_set", "gdt_load", "tss", "enter_user", "elf_load", "user_base", "user_len", "user2_base", "user2_len", "fault_addr", "task_create", "tasks", "idle", "flat" };
             for (fsonly) |b| {
                 if (std.mem.eql(u8, name, b)) return self.fail("'{s}' is freestanding-only (kernel code via --emit-c --freestanding)", .{name});
             }
@@ -2405,6 +2443,10 @@ pub const Emitter = struct {
             if (cfn == null) return self.fail("unknown cpu.{s} in emit v1", .{method});
         } else if (std.mem.eql(u8, module, "http")) {
             return self.fail("'http' is script-only (network); run it with c4c, not --emit-c", .{});
+        } else if (std.mem.eql(u8, module, "vgatogui")) {
+            return self.fail("'vgatogui' is script-only (VGA emulator window); run it with c4c, not --emit-c", .{});
+        } else if (std.mem.eql(u8, module, "vga")) {
+            return self.fail("'vga' module is script-only (needs vgatogui); kernels use bare vga_* builtins with --emit-c --freestanding", .{});
         } else {
             return self.fail("unknown module '{s}'", .{module});
         }

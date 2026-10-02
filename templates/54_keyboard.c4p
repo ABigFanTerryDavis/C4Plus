@@ -9,7 +9,7 @@
 #   objcopy -O binary kbd.pe kbd.bin
 #   ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
 #   objcopy -O binary -j .boot boot.pe boot.bin
-#   cat boot.bin kbd.bin > kdisk.img   (pad kernel area to 64K)
+#   cat boot.bin kbd.bin > kdisk.img   (pad kernel area to 96K)
 #   qemu-system-i386 -drive format=raw,file=kdisk.img -display none ^
 #     -debugcon file:zig-out/k.log -device isa-debug-exit,iobase=0xf4,iosize=0x04 ^
 #     -monitor stdio

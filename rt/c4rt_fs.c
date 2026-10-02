@@ -120,6 +120,7 @@ typedef struct {
     unsigned esp;
     int has_msg;
     long msg;
+    unsigned char fpu[512] __attribute__((aligned(16)));
 } TCB;
 static TCB tcbs[MAX_TASKS];
 static int cur_task = 0;
@@ -128,10 +129,68 @@ static int tasks_inited = 0;
 static const unsigned kstack_tops[MAX_TASKS] = {0x90000, 0x8C000, 0x8A000, 0x88000};
 static void tss_set_esp0(unsigned top);
 
+/* Per-task FPU (x87 + SSE) state: interrupt handlers never touch FP regs,
+ * but the interrupted code may live in them, so each switch saves the
+ * outgoing image and restores the incoming one (eager FPU switching). */
+static unsigned char fpu_init_img[512] __attribute__((aligned(16)));
+static int fpu_ok = 0;
+static unsigned char fpu_tmp[512] __attribute__((aligned(16)));
+static void fpu_setup(void) {
+    unsigned edx = 0;
+    unsigned ebx_dummy = 0, ecx_dummy = 0;
+    if (fpu_ok)
+        return;
+    __asm__ volatile("cpuid"
+                     : "=d"(edx), "=b"(ebx_dummy), "=c"(ecx_dummy)
+                     : "a"(1));
+    if (!(edx & (1u << 24))) {
+        c4_write("nofx", 4);
+        c4_halt();
+    }    __asm__ volatile("fxsave %0"
+                     : "=m"(*(struct {
+                         char x[512];
+                     } *)fpu_tmp)
+                     :
+                     : "memory");
+    __asm__ volatile("fninit");
+    {
+        unsigned mx = 0x1F80;
+        __asm__ volatile("ldmxcsr %0" ::"m"(mx));
+    }
+    __asm__ volatile("fxsave %0"
+                     : "=m"(*(struct {
+                         char x[512];
+                     } *)fpu_init_img));
+    __asm__ volatile("fxrstor %0" ::"m"(*(struct {
+                         char x[512];
+                     } *)fpu_tmp)
+                     : "memory");
+    fpu_ok = 1;
+}
+static void fpu_save(unsigned char *p) {
+    __asm__ volatile("fxsave %0"
+                     : "=m"(*(struct {
+                         char x[512];
+                     } *)p)
+                     :
+                     : "memory");
+}
+static void fpu_restore(unsigned char *p) {
+    __asm__ volatile("fxrstor %0" ::"m"(*(struct {
+                         char x[512];
+                     } *)p)
+                     : "memory");
+}
+static void fpu_copy(unsigned char *d, unsigned char *s) {
+    for (int i = 0; i < 512; i++)
+        d[i] = s[i];
+}
+
 static void sched_init(void) {
     if (tasks_inited)
         return;
     tasks_inited = 1;
+    fpu_setup();
     for (int i = 0; i < MAX_TASKS; i++) {
         tcbs[i].state = TS_EMPTY;
         tcbs[i].esp = 0;
@@ -188,6 +247,7 @@ unsigned c4_schedule(unsigned esp) {
         c4_write(" ", 1);
     }
     tcbs[cur_task].esp = esp;
+    fpu_save(tcbs[cur_task].fpu);
     if (tcbs[cur_task].state == TS_RUNNING)
         tcbs[cur_task].state = TS_READY;
     for (int k = 1; k < MAX_TASKS; k++) {
@@ -198,7 +258,7 @@ unsigned c4_schedule(unsigned esp) {
             tcbs[i].state = TS_RUNNING;
             last_task = i;
             cur_task = i;
-            if (sched_log_n <= 24) {
+            if (sched_log_n < 40) {
                 char c = (char)('0' + i);
                 c4_write(&c, 1);
                 c4_write(":", 1);
@@ -225,13 +285,14 @@ unsigned c4_schedule(unsigned esp) {
                 }
             }
             tss_set_esp0(kstack_tops[i]);
+            fpu_restore(tcbs[i].fpu);
             return tcbs[i].esp;
         }
     }
     if (tcbs[cur_task].state == TS_READY) {
         tcbs[cur_task].state = TS_RUNNING;
         last_task = cur_task;
-        if (sched_log_n <= 24) {
+        if (sched_log_n < 40) {
             char c = (char)('0' + cur_task);
             c4_write(&c, 1);
             c4_write(":", 1);
@@ -245,14 +306,16 @@ unsigned c4_schedule(unsigned esp) {
             c4_write("\n", 1);
         }
         tss_set_esp0(kstack_tops[cur_task]);
+        fpu_restore(tcbs[cur_task].fpu);
         return tcbs[cur_task].esp;
     }
-    if (sched_log_n <= 24) {
+    if (sched_log_n < 40) {
         c4_write("=0:IDLE\n", 8);
     }
     tcbs[0].state = TS_RUNNING;
     cur_task = 0;
     tss_set_esp0(kstack_tops[0]);
+    fpu_restore(tcbs[0].fpu);
     return tcbs[0].esp;
 }
 
@@ -294,6 +357,7 @@ C4Val c4_task_create(C4Val entry, C4Val esp_top) {
     tcbs[id].esp = base + 4;
     tcbs[id].state = TS_READY;
     tcbs[id].has_msg = 0;
+    fpu_copy(tcbs[id].fpu, fpu_init_img);
     __asm__ volatile("sti");
     return c4_num((double)id);
 }
@@ -337,6 +401,8 @@ static int task_send(int tid, long msg) {
 
 void c4_syscall_dispatch(unsigned *regs) {
     unsigned n = regs[9];
+    sched_init();
+    fpu_save(tcbs[cur_task].fpu);
     if (n == 1) {
         const char *s = (const char *)regs[6];
         unsigned len = regs[8];
@@ -376,6 +442,7 @@ void c4_syscall_dispatch(unsigned *regs) {
     } else {
         regs[9] = 0xFFFFFFFFu;
     }
+    fpu_restore(tcbs[cur_task].fpu);
 }
 
 static volatile unsigned char kbd_head = 0;
@@ -551,13 +618,25 @@ C4Val c4_syscall(C4Val num, C4Val a, C4Val b, C4Val c) {
     __asm__ volatile("int $0x80" : "=a"(ret) : "a"(n), "b"(aa), "c"(bb), "d"(cc) : "memory");
     return c4_num((double)ret);
 }
-C4Val c4_addr(C4Val v) {
-    if (v.t == 1)
+C4Val c4_addr(C4Val v) {    if (v.t == 1)
         return c4_num((double)(unsigned long)v.str);
     if (v.t == 2)
         return c4_num((double)(unsigned long)v.list->items);
     c4_err("TypeError");
     return c4_num(0);
+}
+C4Val c4_flat(C4Val l) {
+    if (l.t != 2)
+        c4_err("TypeError");
+    c4_size_t n = l.list->len;
+    char *p = xmalloc(n ? n : 1);
+    for (c4_size_t i = 0; i < n; i++) {
+        C4Val b = l.list->items[i];
+        if (b.t != 0 || b.num != c4_trunc(b.num) || b.num < 0 || b.num > 255)
+            c4_err("TypeError");
+        p[i] = (char)(int)b.num;
+    }
+    return c4_num((double)(unsigned long)p);
 }
 /* ---- 0.3.6: user mode (GDT/TSS/enter), ELF loader ---- */
 static unsigned long long c4_ugdt[6];
@@ -845,6 +924,101 @@ void c4_dict_put(C4Val d, const char *k, C4Val v) {
     if (d.t != 3)
         c4_err("TypeError");
     dict_put(d.dict, k, v);
+}
+
+/* ---- 0.4.1: VGA text-mode module (bare builtins, freestanding) ---- */
+#define VGA_COLS 80
+#define VGA_ROWS 25
+#define VGA_BASE 0xB8000UL
+static int vga_num(C4Val v, int lo, int hi) {
+    if (v.t != 0 || v.num != c4_trunc(v.num) || v.num < lo || v.num > hi)
+        c4_err("TypeError");
+    return (int)v.num;
+}
+static unsigned vga_cell_addr(int r, int c) {
+    return (unsigned)(VGA_BASE + (unsigned)(r * VGA_COLS + c) * 2);
+}
+C4Val c4_vga_clear(C4Val attr) {
+    int a = vga_num(attr, 0, 255);
+    unsigned cells = (unsigned)a * 0x0100u + 0x20u;
+    unsigned both = cells | (cells << 16);
+    for (int i = 0; i < VGA_COLS * VGA_ROWS / 2; i++)
+        *(volatile unsigned *)(VGA_BASE + (unsigned)i * 4) = both;
+    return c4_nil();
+}
+C4Val c4_vga_put(C4Val r, C4Val c, C4Val ch, C4Val attr) {
+    int rr = vga_num(r, 0, VGA_ROWS - 1), cc = vga_num(c, 0, VGA_COLS - 1);
+    int b = vga_num(ch, 0, 255), a = vga_num(attr, 0, 255);
+    unsigned addr = vga_cell_addr(rr, cc);
+    unsigned aligned = addr & ~3u;
+    unsigned v = *(volatile unsigned *)aligned;
+    unsigned sh = (addr - aligned) * 8;
+    unsigned cell = (unsigned)b + (unsigned)a * 256;
+    unsigned mask = 0xFFFFu << sh;
+    *(volatile unsigned *)aligned = (v & ~mask) | ((cell << sh) & mask);
+    return c4_nil();
+}
+C4Val c4_vga_get(C4Val r, C4Val c) {
+    int rr = vga_num(r, 0, VGA_ROWS - 1), cc = vga_num(c, 0, VGA_COLS - 1);
+    unsigned addr = vga_cell_addr(rr, cc);
+    unsigned aligned = addr & ~3u;
+    unsigned v = *(volatile unsigned *)aligned;
+    unsigned sh = (addr - aligned) * 8;
+    return c4_num((double)((v >> sh) & 0xFFFFu));
+}
+C4Val c4_vga_text(C4Val r, C4Val c, C4Val s, C4Val attr) {
+    int rr = vga_num(r, 0, VGA_ROWS - 1), cc = vga_num(c, 0, VGA_COLS - 1);
+    if (s.t != 1)
+        c4_err("TypeError");
+    int a = vga_num(attr, 0, 255);
+    for (const char *p = s.str; *p; p++) {
+        if (*p == '\n') {
+            cc = 0;
+            rr++;
+            if (rr >= VGA_ROWS)
+                return c4_nil();
+            continue;
+        }
+        unsigned cell = (unsigned char)*p + (unsigned)a * 256;
+        unsigned addr = vga_cell_addr(rr, cc);
+        unsigned aligned = addr & ~3u;
+        unsigned v = *(volatile unsigned *)aligned;
+        unsigned sh = (addr - aligned) * 8;
+        unsigned mask = 0xFFFFu << sh;
+        *(volatile unsigned *)aligned = (v & ~mask) | ((cell << sh) & mask);
+        cc++;
+        if (cc >= VGA_COLS) {
+            cc = 0;
+            rr++;
+            if (rr >= VGA_ROWS)
+                return c4_nil();
+        }
+    }
+    return c4_nil();
+}
+C4Val c4_vga_scroll(void) {
+    for (int r = 0; r < VGA_ROWS - 1; r++)
+        for (int i = 0; i < VGA_COLS * 2 / 4; i++)
+            *(volatile unsigned *)(VGA_BASE + (unsigned)(r * VGA_COLS * 2) + (unsigned)i * 4) =
+                *(volatile unsigned *)(VGA_BASE + (unsigned)((r + 1) * VGA_COLS * 2) + (unsigned)i * 4);
+    for (int i = 0; i < VGA_COLS / 2; i++)
+        *(volatile unsigned *)(VGA_BASE + (unsigned)((VGA_ROWS - 1) * VGA_COLS * 2) + (unsigned)i * 4) = 0x07200720u;
+    return c4_nil();
+}
+C4Val c4_vga_move(C4Val r, C4Val c) {
+    int rr = vga_num(r, 0, VGA_ROWS - 1), cc = vga_num(c, 0, VGA_COLS - 1);
+    unsigned pos = (unsigned)(rr * VGA_COLS + cc);
+    c4_outb_raw(0x3D4, 14);
+    c4_outb_raw(0x3D5, (unsigned char)((pos >> 8) & 255));
+    c4_outb_raw(0x3D4, 15);
+    c4_outb_raw(0x3D5, (unsigned char)(pos & 255));
+    return c4_nil();
+}
+C4Val c4_vga_size(void) {
+    C4Val o = c4_list();
+    list_push(o.list, c4_num(VGA_COLS));
+    list_push(o.list, c4_num(VGA_ROWS));
+    return o;
 }
 
 /* decimal digits of v (0 <= v < 2^53, integer), written backward from *pp */

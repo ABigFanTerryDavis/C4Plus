@@ -1,0 +1,42 @@
+# 66_vga — the vga_* builtins in a freestanding kernel (same screen,
+# less code than 63_vga: clear/put/get/text/scroll/move/size are real
+# builtins backed by rt/c4rt_fs.c instead of hand-rolled poke32).
+# Build (same shape as 61_ata):
+#   c4c --emit-c 66_vga.c4p --freestanding -o vgam.c
+#   gcc -m32 -ffreestanding -nostdlib -c -o vgam.o vgam.c -I rt
+#   gcc -m32 -ffreestanding -nostdlib -c -o fs.o rt/c4rt_fs.c
+#   as --32 rt/irq.s -o irq.o
+#   as --32 boot/boot.s -o boot.o
+#   ld -m i386pe -T boot/linkflat.ld -o vgam.pe vgam.o fs.o irq.o
+#   objcopy -O binary vgam.pe vgam.bin
+#   ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
+#   objcopy -O binary -j .boot boot.pe boot.bin
+#   cat boot.bin vgam.bin > vmdisk.img   (pad kernel area to 96K)
+#   qemu-system-i386 -drive format=raw,file=vmdisk.img -display none ^
+#     -debugcon file:zig-out/vm.log -device isa-debug-exit,iobase=0xf4,iosize=0x04
+# Expect: size, clear/get, put/get, text/get, scroll proof, qemu exit.
+# Script twin: run the same calls under c4c with a vgatogui window open.
+
+print vga_size()
+vga_clear(7)
+print vga_get(0, 0)
+vga_put(0, 0, 72, 15)
+vga_put(0, 1, 105, 15)
+print vga_get(0, 0)
+print vga_get(0, 1)
+vga_text(5, 10, "hi vga", 15)
+print vga_get(5, 10)
+print vga_get(5, 11)
+vga_move(5, 12)
+vga_clear(7)
+let r = 0
+while r < 25 {
+  vga_text(r, 0, "row " + str(r), 7)
+  r = r + 1
+}
+vga_scroll()
+print vga_get(0, 0)
+print vga_get(1, 0)
+print vga_get(24, 0)
+print "vga mod ok"
+exit(0)

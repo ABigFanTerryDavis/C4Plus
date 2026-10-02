@@ -1,0 +1,26 @@
+# VGA emulator: same calls as the kernel vga_* builtins, drawn in a window.
+# Needs a display (fails cleanly headless); check-safe via bounded loop.
+import vga
+import vgatogui
+import gui
+print vga.size()
+let w = vgatogui.window("vga demo", 640, 400)
+vga.clear(1)
+vga.text(0, 0, "hi vga", 15)
+vga.put(2, 3, 66, 12)
+print vga.get(2, 3)
+print vga.get(0, 0)
+vga.move(2, 4)
+vga.scroll()
+print vga.get(2, 3)
+vga.clear(7)
+let n = 0
+gui.post_close(w)
+while gui.alive(w) {
+  let ev = gui.wait(w)
+  n = n + 1
+  if n > 3 {
+    break
+  }
+}
+print "vgademo done"

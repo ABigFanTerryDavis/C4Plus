@@ -1,4 +1,4 @@
-# C4Plus — Complete Docs (v0.3.9)
+# C4Plus — Complete Docs (v0.4.0)
 
 C4Plus (`.c4p`) is a small scripting language with headers (`.c4h`),
 assembly sidecars (`.c4asm`), batch files (`.c4bht`), projects
@@ -322,6 +322,15 @@ http.redirects()           # current max (default 3)
 http.redirects(0)          # 0 = return 3xx as-is with location header
 # bodies cap at 8MB; GET/HEAD/DELETE/OPTIONS with a body is a catchable
 # error; DNS/connect/TLS failures are catchable with try/catch
+
+import vga                 # 80x25 text cells; script needs vgatogui window
+import vgatogui            # script-only VGA emulator window
+let w = vgatogui.window("vga demo", 640, 400)
+vga.clear(7)
+vga.text(0, 0, "hi vga", 15)   # also put(r,c,ch,attr)/get/move/scroll/size
+vga_put(2, 3, 66, 12)          # bare form too (this is what kernels use)
+# kernels use bare vga_* builtins with --emit-c --freestanding (same calls,
+# real 0xB8000; see templates/66_vga.c4p). No vgatogui needed on hardware.
 ```
 
 ## 7. Assembly side by side (`.c4asm`)
@@ -503,6 +512,8 @@ or native-mode for these):
 * the `gui` module (Windows GUI — run it as a script)
 * `os.exec/spawn/pipe/poll/kill/close` (process spawn — script-only)
 * `http` (network — script-only)
+* `vgatogui` (VGA emulator window — script-only; `import vga` works in
+  scripts with a window open, kernels use bare `vga_*` builtins)
 * closures capturing locals (top-level function values compile and
   call fine; only captured-variable capture stays script-side)
 * `#target sim` needs the `cpu` module... no wait, `cpu` compiles.
@@ -529,7 +540,7 @@ Entry point is `kmain`, not `main`.
 
 `boot/` has a stage-1 sector (`boot.s`), linker scripts and a
 QEMU-tested recipe — see `templates/44_kmain.c4p`. Kernel meter:
-65% — stage-1 loads 128 sectors to 0x10000, enters pmode, runs
+80% — stage-1 loads 192 sectors to 0x10000, enters pmode, runs
 `kmain`, exits via the debug port (QEMU exit `(code<<1)|1`); PIT
 timer IRQ at 100Hz (`52_timer`); PS/2 keyboard driver with line
 input (`54_keyboard`); paging with a 4MB identity map + kernel
@@ -541,7 +552,16 @@ fault gates 0–31 (`58_usermode` — prints `hello from ring3`);
 preemptive round-robin scheduler with mailbox IPC over the PIT
 (`59_sched` — two tasks ping-pong 1..5 through rendezvous
 send/blocking recv, five `got N` lines, `all tasks done`, clean
-exit; per-task kernel stacks, switch tracer, ESP validation).
+exit; per-task kernel stacks, eager FPU switching, switch tracer,
+ESP validation); ATA PIO disk reads (`61_ata`, `inw` builtin);
+read-only FAT12 via `user/mkfat.py` (`62_fat` — BPB, root dir,
+12-bit chains, multi-cluster files); VGA text console at `0xB8000`
+with scroll + cursor (`63_vga`, `vga_*` builtins); interactive
+shell `ls`/`cat`/`help`/`ver`/`poweroff` (`64_shell`); `run FILE`
+disk exec into ring-3 tasks (`65_exec`, `flat()` flattens files
+for the ELF loader); same VGA calls as a module for scripts via
+`import vga` + `import vgatogui` emulator (`66_vga`,
+`examples/ex_vgademo.c4p`).
 
 Freestanding extras for kernel code (`--emit-c --freestanding`
 only — clean errors elsewhere): `outb(port, val)`, `inb(port)`, `inw(port)` (16-bit),
@@ -555,8 +575,28 @@ installs IRQ0 and counts ticks (link `rt/irq.s` into the kernel).
 (unmask with `outb(33, 252)`). User-mode extras: `gdt_set/gdt_load`,
 `tss(esp0)`, `syscall_addr/fault_addr`, `elf_load`, `user_base/user_len`,
 `user2_base`, `enter_user(entry, esp)`, `task_create(entry, esp_top)`,
-`tasks()`, `idle()` — see `templates/58_usermode.c4p` and
-`templates/59_sched.c4p` (link `rt/irq.s` + `rt/userblob.c`).
+`tasks()`, `idle()`, `flat(list)` (pack file bytes for the ELF loader) —
+see `templates/58_usermode.c4p` and `templates/59_sched.c4p`
+(link `rt/irq.s` + `rt/userblob.c`). Storage extras: `ata_read` pattern
+in `61_ata`, FAT12 in `62_fat` (volume built by `user/mkfat.py`),
+VGA builtins `vga_clear/put/get/text/scroll/move/size`
+(`templates/63_vga.c4p` hand-rolled, `66_vga.c4p` via builtins).
+
+## QEMU notes
+
+Two things that bite when testing kernels under QEMU TCG (both invisible on
+real hardware):
+
+* Boot loads come from `boot/boot.s`: 192 sectors (96KB) to `0x10000` with
+  wraparound-safe seg:off math. Keep kernel bins padded to match their recipe
+  (`pad kernel area to 96K`) and anything after them (e.g. a FAT volume) at a
+  fixed base LBA — the kernel reads absolute LBAs, so layout and `BASE` must
+  agree or you read a neighboring volume's zeros.
+* Timer-preempted `while true` + `return` helpers (e.g. a `readline()`)
+  misbehave rarely (~5%/tick: wrong branch taken with coherent state).
+  Bounded conditions with inline spins (`while gotline == 0`) are solid;
+  `-d nochain` also makes it vanish. Suspected TCG translation-caching
+  interaction, not guest logic — every frame/esp/state dump reads healthy.
 
 ## 13. REPL
 

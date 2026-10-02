@@ -11,7 +11,7 @@
 #   objcopy -O binary fat.pe fat.bin
 #   ld -m i386pe -T boot/bootlink.ld -o boot.pe boot.o
 #   objcopy -O binary -j .boot boot.pe boot.bin
-#   cat boot.bin fat.bin(pad 64K) fat12.bin > f1disk.img  (fat base LBA 129)
+#   cat boot.bin fat.bin(pad 96K) fat12.bin > f1disk.img  (fat base LBA 193)
 #   qemu-system-i386 -drive format=raw,file=f1disk.img -display none ^
 #     -debugcon file:zig-out/f1.log -device isa-debug-exit,iobase=0xf4,iosize=0x04
 # Expect: BPB values, root names, file text, ELF magic, qemu exit = (code<<1)|1.
@@ -74,7 +74,7 @@ fn fat12(fat, cl) {
   return (peek(fat, off) >> 4) + peek(fat, off + 1) * 16
 }
 
-let BASE = 129
+let BASE = 193
 let bs = ata_read(BASE)
 print rd16(bs, 11)
 print peek(bs, 13)
@@ -101,8 +101,8 @@ while e < 16 {
 }
 
 fn fat_read(name83) {
-  let root = ata_read(134)
-  let fat = ata_read(130)
+  let root = ata_read(198)
+  let fat = ata_read(194)
   let e = 0
   while e < 16 {
     if peek(root, e * 32) == 0 {
@@ -123,7 +123,7 @@ fn fat_read(name83) {
       let out = bytes(sz)
       let pos = 0
       while cl < 4088 {
-        let sec = ata_read(133 + cl)
+        let sec = ata_read(197 + cl)
         let b = 0
         while b < 512 {
           if pos < sz {
