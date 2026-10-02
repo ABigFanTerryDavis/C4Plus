@@ -11,7 +11,8 @@ _irq0_stub:
     mov $0x10, %ax
     mov %ax, %ds
     mov %ax, %es
-    push %esp
+    mov %esp, %eax
+    push %eax
     call _c4_schedule
     mov %eax, %esp
     pop %es
@@ -43,7 +44,8 @@ _syscall_stub:
     mov $0x10, %ax
     mov %ax, %ds
     mov %ax, %es
-    push %esp
+    mov %esp, %eax
+    push %eax
     call _c4_syscall_dispatch
     add $4, %esp
     pop %es
