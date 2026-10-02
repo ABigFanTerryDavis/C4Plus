@@ -436,6 +436,21 @@ vga.text(0, 0, "hi vga", 15)   # also put(r,c,ch,attr)/get/move/scroll/size
 vga_put(2, 3, 66, 12)          # bare form too (this is what kernels use)
 # kernels use bare vga_* builtins with --emit-c --freestanding (same calls,
 # real 0xB8000; see templates/66_vga.c4p). No vgatogui needed on hardware.
+
+import csv                 # parse/stringify tables (compiles to native too)
+let t = csv.parse("a,b\n1,2")  # -> list of lists
+print csv.stringify(t)     # quoting handled; sep arg optional (";"...)
+# lenient: unterminated quotes read to end; empty text -> []
+
+import socket              # TCP, script-only like http
+let c = socket.connect("127.0.0.1", 80)  # -> handle
+socket.send(c, "hi\n")     # -> bytes sent
+socket.recv(c, 64)         # up to 64 bytes (blocks; frame it yourself)
+socket.recv_line(c)        # one \n-line (chat/HTTP headers)
+socket.close(c)
+socket.listen(8080)        # -> server handle (127.0.0.1 default)
+socket.accept(s)           # blocks until a client arrives -> handle
+# DNS/connect/refused/reset failures are catchable with try/catch
 ```
 
 ---
@@ -718,6 +733,9 @@ cluster chains, multi-cluster files), a VGA text console at `0xB8000` with scrol
 hardware cursor (`63_vga`), an interactive shell with `ls`/`cat`/`help`/`ver`/`poweroff`
 over keyboard line input (`64_shell`), and `run FILE` executing ELFs straight off disk
 into ring-3 tasks (`65_exec` — `flat()` flattens a file list for the ELF loader).
+Script-side networking and data: a TCP echo server + chat client (`67_socket` →
+`68_chat` — `connect/listen/accept/send/recv/recv_line/close`, errors catchable)
+and CSV tables (`csv.parse/stringify` with quoting + custom separators, native-compiled).
 
 ### Kernel meter
 
@@ -736,7 +754,7 @@ rt/             runtimes: c4rt.c/h (hosted), c4rt_fs.c/h (freestanding), irq.s, 
 boot/           stage-1 boot sector + linker scripts
 user/           ring-3 programs (hello.s, pong.s) + mkelf.py ELF wrapper
 examples/       small programs per feature (also used as tests)
-templates/      numbered walkthroughs 01_hello .. 66_vga (+ .c4asm sidecars)
+templates/      numbered walkthroughs 01_hello .. 68_chat (+ .c4asm sidecars)
 build.zig       build definition (version lives here)
 build.zig.zon   package manifest (version mirrored here)
 DOCS.md         full language + kernel reference
@@ -746,7 +764,7 @@ zip/            local release snapshots (kept out of git; use GitHub releases)
 `templates/` is the guided tour: start at `01_hello.c4p` for the language, `43_gdt` →
 `44_kmain` → `52_timer` → `54_keyboard` → `55_paging` → `56_syscall` → `58_usermode` →
 `59_sched` → `61_ata` → `62_fat` → `63_vga` → `64_shell` → `65_exec` → `66_vga` for the
-kernel path. Every kernel template header documents its exact build recipe.
+kernel path, then `67_socket` → `68_chat` for TCP. Every kernel template header documents its exact build recipe.
 
 ---
 
@@ -768,10 +786,13 @@ stays out of git; public releases go through GitHub releases.
   persistence for every module, GUI `password` + `focus`.
 - **0.3.9:** stabilization — full interp-vs-native suite green (94 files),
   task-exit mailbox hygiene, no new features. Closes the 0.3.x line.
-- **0.4.0 (this):** the big one — ATA PIO (`inw`), FAT12 (`user/mkfat.py`),
+- **0.4.0:** the big one — ATA PIO (`inw`), FAT12 (`user/mkfat.py`),
   VGA console, interactive shell, `run FILE` disk exec into ring-3 tasks,
   plus the display story (`vga_*` kernel builtins, `import vga` +
   `import vgatogui` emulator). Kernel meter 65% → 80%.
+- **0.4.1 (this):** `socket` (TCP client+server, `connect/listen/accept/send/
+  recv/recv_line/close`, catchable errors, templates `67_socket`+`68_chat`) and
+  `csv` (`parse/stringify`, quoted fields, custom separators, native-compiled).
 - After that: writable filesystem, more drivers, fuller shell.
 
 ---

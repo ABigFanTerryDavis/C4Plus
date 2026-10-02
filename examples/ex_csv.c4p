@@ -1,0 +1,9 @@
+# csv basics: parse, stringify, round-trip, custom separator
+import csv
+let t = csv.parse("name,age\nann,30\nbob,7")
+print t
+print t[1][0]
+print csv.stringify(t)
+let q = csv.parse("a,\"b,c\",\"d\"\"e\"")
+print csv.parse(csv.stringify(q))
+print csv.parse("a;b", ";")

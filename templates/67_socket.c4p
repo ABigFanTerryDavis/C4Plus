@@ -1,0 +1,17 @@
+# 67_socket — TCP echo server on loopback. Run this first:
+#   c4c 67_socket.c4p
+# then in another terminal run 68_chat.c4p (the client). The server
+# echoes one line per connection back with an "echo:" prefix and exits.
+# All network failures are catchable with try/catch; see 68_chat.
+
+import socket
+let s = socket.listen(18482)
+print "echo server on 18482"
+let c = socket.accept(s)
+print "client in"
+let line = socket.recv_line(c)
+print ("got=" + line)
+socket.send(c, "echo:" + line + "\n")
+socket.close(c)
+socket.close(s)
+print "server done"

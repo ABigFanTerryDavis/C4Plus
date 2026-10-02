@@ -78,6 +78,8 @@ C4Val c4_str_b(C4Val v);
 C4Val c4_int(C4Val v);
 C4Val c4_split(C4Val s, C4Val sep);
 C4Val c4_join(C4Val l, C4Val sep);
+C4Val c4_csv_parse(C4Val s, C4Val sep);
+C4Val c4_csv_stringify(C4Val rows, C4Val sep);
 C4Val c4_substr(C4Val s, C4Val start, C4Val count);
 C4Val c4_trim(C4Val s);
 C4Val c4_upper(C4Val s);

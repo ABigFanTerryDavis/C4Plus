@@ -1,4 +1,4 @@
-# C4Plus — Complete Docs (v0.4.0)
+# C4Plus — Complete Docs (v0.4.1)
 
 C4Plus (`.c4p`) is a small scripting language with headers (`.c4h`),
 assembly sidecars (`.c4asm`), batch files (`.c4bht`), projects
@@ -331,6 +331,21 @@ vga.text(0, 0, "hi vga", 15)   # also put(r,c,ch,attr)/get/move/scroll/size
 vga_put(2, 3, 66, 12)          # bare form too (this is what kernels use)
 # kernels use bare vga_* builtins with --emit-c --freestanding (same calls,
 # real 0xB8000; see templates/66_vga.c4p). No vgatogui needed on hardware.
+
+import csv                 # parse/stringify tables (compiles to native too)
+let t = csv.parse("a,b\n1,2")  # -> list of lists
+print csv.stringify(t)     # quoting handled; sep arg optional (";"...)
+# lenient: unterminated quotes read to end; empty text -> []
+
+import socket              # TCP, script-only like http
+let c = socket.connect("127.0.0.1", 80)  # -> handle
+socket.send(c, "hi\n")     # -> bytes sent
+socket.recv(c, 64)         # up to 64 bytes (blocks; frame it yourself)
+socket.recv_line(c)        # one \n-line (chat/HTTP headers)
+socket.close(c)
+socket.listen(8080)        # -> server handle (127.0.0.1 default)
+socket.accept(s)           # blocks until a client arrives -> handle
+# DNS/connect/refused/reset failures are catchable with try/catch
 ```
 
 ## 7. Assembly side by side (`.c4asm`)
@@ -514,6 +529,7 @@ or native-mode for these):
 * `http` (network — script-only)
 * `vgatogui` (VGA emulator window — script-only; `import vga` works in
   scripts with a window open, kernels use bare `vga_*` builtins)
+* `socket` (TCP — script-only)
 * closures capturing locals (top-level function values compile and
   call fine; only captured-variable capture stays script-side)
 * `#target sim` needs the `cpu` module... no wait, `cpu` compiles.
@@ -561,7 +577,11 @@ shell `ls`/`cat`/`help`/`ver`/`poweroff` (`64_shell`); `run FILE`
 disk exec into ring-3 tasks (`65_exec`, `flat()` flattens files
 for the ELF loader); same VGA calls as a module for scripts via
 `import vga` + `import vgatogui` emulator (`66_vga`,
-`examples/ex_vgademo.c4p`).
+`examples/ex_vgademo.c4p`). TCP sockets (`67_socket` server +
+`68_chat` client: `connect/listen/accept/send/recv/recv_line/close`,
+catchable errors, `examples/ex_socket.c4p`); CSV tables
+(`csv.parse/stringify`, quoted fields, custom separators,
+compiles to native too, `examples/ex_csv.c4p`).
 
 Freestanding extras for kernel code (`--emit-c --freestanding`
 only — clean errors elsewhere): `outb(port, val)`, `inb(port)`, `inw(port)` (16-bit),

@@ -25,6 +25,11 @@ fn addTool(
         .target = target,
         .optimize = optimize,
     });
+    const sock_mod = b.createModule(.{
+        .root_source_file = b.path("src/sock.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
     const exe = b.addExecutable(.{
         .name = name,
         .root_module = b.createModule(.{
@@ -36,6 +41,7 @@ fn addTool(
                 .{ .name = "emit", .module = emit_mod },
                 .{ .name = "gui", .module = gui_mod },
                 .{ .name = "proc", .module = proc_mod },
+                .{ .name = "sock", .module = sock_mod },
             },
         }),
     });
@@ -51,7 +57,7 @@ fn addTool(
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const version = "0.4.0";
+    const version = "0.4.1";
 
     const c4c = addTool(b, "c4c", version, target, optimize);
     _ = addTool(b, "c4pp", version, target, optimize);

@@ -1,6 +1,6 @@
 .{
     .name = .C4Plus,
-    .version = "0.4.0",
+    .version = "0.4.1",
     .minimum_zig_version = "0.16.0",
     .paths = .{""},
     .fingerprint = 0x7d2b57f45bf62076,

@@ -4,6 +4,7 @@ const tool = @import("build_options");
 const emit = @import("emit");
 const gui = @import("gui");
 const proc = @import("proc");
+const sock = @import("sock");
 
 const ErrInfo = struct {
     file: ?[]const u8 = null,
@@ -649,6 +650,8 @@ fn replMain(io: Io, arena: std.mem.Allocator, envmap: ?*const std.process.Enviro
         sub.imported_hex = repl_hex;
         sub.imported_random = repl_random;
         sub.imported_strings = repl_strings;
+        sub.imported_csv = repl_csv;
+        sub.imported_socket = repl_socket;
         sub.imported_http = repl_http;
         sub.http_redirects = repl_http_redir;
         sub.imported_vga = repl_vga;
@@ -683,6 +686,8 @@ fn replMain(io: Io, arena: std.mem.Allocator, envmap: ?*const std.process.Enviro
         repl_hex = sub.imported_hex;
         repl_random = sub.imported_random;
         repl_strings = sub.imported_strings;
+        repl_csv = sub.imported_csv;
+        repl_socket = sub.imported_socket;
         repl_http = sub.imported_http;
         repl_http_redir = sub.http_redirects;
         repl_vga = sub.imported_vga;
@@ -702,6 +707,8 @@ var repl_gui: bool = false;
 var repl_hex: bool = false;
 var repl_random: bool = false;
 var repl_strings: bool = false;
+var repl_csv: bool = false;
+var repl_socket: bool = false;
 var repl_http: bool = false;
 var repl_http_redir: u16 = 3;
 var repl_vga: bool = false;
@@ -1434,6 +1441,8 @@ const Parser = struct {
     imported_hex: bool = false,
     imported_random: bool = false,
     imported_strings: bool = false,
+    imported_csv: bool = false,
+    imported_socket: bool = false,
     imported_http: bool = false,
     imported_vga: bool = false,
     imported_vgatogui: bool = false,
@@ -1513,6 +1522,8 @@ const Parser = struct {
             .imported_hex = self.imported_hex,
             .imported_random = self.imported_random,
             .imported_strings = self.imported_strings,
+            .imported_csv = self.imported_csv,
+            .imported_socket = self.imported_socket,
             .imported_http = self.imported_http,
             .imported_vga = self.imported_vga,
             .imported_vgatogui = self.imported_vgatogui,
@@ -1565,6 +1576,8 @@ const Parser = struct {
             .imported_hex = self.imported_hex,
             .imported_random = self.imported_random,
             .imported_strings = self.imported_strings,
+            .imported_csv = self.imported_csv,
+            .imported_socket = self.imported_socket,
             .imported_http = self.imported_http,
             .imported_vga = self.imported_vga,
             .imported_vgatogui = self.imported_vgatogui,
@@ -1730,12 +1743,16 @@ const Parser = struct {
                     }
                 } else if (std.mem.eql(u8, mod, "http")) {
                     self.imported_http = true;
+                } else if (std.mem.eql(u8, mod, "csv")) {
+                    self.imported_csv = true;
+                } else if (std.mem.eql(u8, mod, "socket")) {
+                    self.imported_socket = true;
                 } else if (std.mem.eql(u8, mod, "vga")) {
                     self.imported_vga = true;
                 } else if (std.mem.eql(u8, mod, "vgatogui")) {
                     self.imported_vgatogui = true;
                 } else {
-                    if (!self.mute)                     std.debug.print("{s}:{d}: unknown module '{s}' (only 'os'/'physics'/'json'/'time'/'heap'/'cpu'/'hex'/'random'/'strings'/'gui'/'http'/'vga'/'vgatogui' or \"file.c4h\")\n", .{ self.file, self.line, mod });
+                    if (!self.mute)                     std.debug.print("{s}:{d}: unknown module '{s}' (only 'os'/'physics'/'json'/'time'/'heap'/'cpu'/'hex'/'random'/'strings'/'gui'/'http'/'vga'/'vgatogui'/'csv'/'socket' or \"file.c4h\")\n", .{ self.file, self.line, mod });
                     return ParseError.UnknownKeyword;
                 }
             }
@@ -2497,6 +2514,8 @@ const Parser = struct {
             .imported_hex = self.imported_hex,
             .imported_random = self.imported_random,
             .imported_strings = self.imported_strings,
+            .imported_csv = self.imported_csv,
+            .imported_socket = self.imported_socket,
             .imported_http = self.imported_http,
             .imported_vga = self.imported_vga,
             .imported_vgatogui = self.imported_vgatogui,
@@ -2536,6 +2555,8 @@ const Parser = struct {
         if (sub.imported_hex) self.imported_hex = sub.imported_hex or self.imported_hex;
         if (sub.imported_random) self.imported_random = sub.imported_random or self.imported_random;
         if (sub.imported_strings) self.imported_strings = sub.imported_strings or self.imported_strings;
+        if (sub.imported_csv) self.imported_csv = sub.imported_csv or self.imported_csv;
+        if (sub.imported_socket) self.imported_socket = sub.imported_socket or self.imported_socket;
         if (sub.imported_http) self.imported_http = sub.imported_http or self.imported_http;
         if (sub.imported_vga) self.imported_vga = sub.imported_vga or self.imported_vga;
         if (sub.imported_vgatogui) self.imported_vgatogui = sub.imported_vgatogui or self.imported_vgatogui;
@@ -2665,6 +2686,8 @@ const Parser = struct {
             .imported_hex = self.imported_hex,
             .imported_random = self.imported_random,
             .imported_strings = self.imported_strings,
+            .imported_csv = self.imported_csv,
+            .imported_socket = self.imported_socket,
             .imported_http = self.imported_http,
             .imported_vga = self.imported_vga,
             .imported_vgatogui = self.imported_vgatogui,
@@ -2822,6 +2845,124 @@ const Parser = struct {
         return ParseError.ExpectedRBrace;
     }
 
+    fn callSocketMethod(self: *Parser, method: []const u8, arg_vals: []const Value) anyerror!Value {
+        if (!self.imported_socket) {
+            if (!self.mute) std.debug.print("error on line {d}: 'socket' used without 'import socket'\n", .{self.line});
+            return ParseError.UnknownKeyword;
+        }
+        if (std.mem.eql(u8, method, "connect")) {
+            if (arg_vals.len != 2 or arg_vals[0] != .string or arg_vals[1] != .number) return ParseError.TypeError;
+            const port = self.socketPort(arg_vals[1]) orelse return ParseError.TypeError;
+            const host = try self.valueToString(arg_vals[0]);
+            if (self.dry) return Value{ .number = 1 };
+            const id = sock.sockConnect(self.alloc, self.io, host, port) catch |err| {
+                return self.socketFail("connect", err);
+            };
+            return Value{ .number = @floatFromInt(id) };
+        }
+        if (std.mem.eql(u8, method, "listen")) {
+            if ((arg_vals.len != 1 and arg_vals.len != 2) or arg_vals[0] != .number) return ParseError.TypeError;
+            const port = self.socketPort(arg_vals[0]) orelse return ParseError.TypeError;
+            var host: []const u8 = "127.0.0.1";
+            if (arg_vals.len == 2) {
+                if (arg_vals[1] != .string) return ParseError.TypeError;
+                host = try self.valueToString(arg_vals[1]);
+            }
+            if (self.dry) return Value{ .number = 2 };
+            const id = sock.sockListen(self.alloc, self.io, host, port) catch |err| {
+                return self.socketFail("listen", err);
+            };
+            return Value{ .number = @floatFromInt(id) };
+        }
+        if (std.mem.eql(u8, method, "accept")) {
+            if (arg_vals.len != 1 or arg_vals[0] != .number) return ParseError.TypeError;
+            const id: u32 = @intFromFloat(@max(0, arg_vals[0].number));
+            if (self.dry) return Value{ .number = 3 };
+            const nid = sock.sockAccept(self.alloc, self.io, id) catch |err| {
+                return self.socketFail("accept", err);
+            };
+            return Value{ .number = @floatFromInt(nid) };
+        }
+        if (std.mem.eql(u8, method, "send")) {
+            if (arg_vals.len != 2 or arg_vals[0] != .number) return ParseError.TypeError;
+            const id: u32 = @intFromFloat(@max(0, arg_vals[0].number));
+            const data = try self.valueToString(arg_vals[1]);
+            if (self.dry) return Value{ .number = @floatFromInt(data.len) };
+            const n = sock.sockSend(self.alloc, self.io, id, data) catch |err| {
+                return self.socketFail("send", err);
+            };
+            return Value{ .number = @floatFromInt(n) };
+        }
+        if (std.mem.eql(u8, method, "recv")) {
+            if ((arg_vals.len != 1 and arg_vals.len != 2) or arg_vals[0] != .number) return ParseError.TypeError;
+            const id: u32 = @intFromFloat(@max(0, arg_vals[0].number));
+            var max: usize = 65536;
+            if (arg_vals.len == 2) {
+                if (arg_vals[1] != .number) return ParseError.TypeError;
+                const m = arg_vals[1].number;
+                if (m != @trunc(m) or m < 0 or m > 8 * 1024 * 1024) return ParseError.TypeError;
+                max = @intFromFloat(m);
+            }
+            if (max == 0) return Value{ .string = try self.alloc.dupe(u8, "") };
+            if (self.dry) return Value{ .string = try self.alloc.dupe(u8, "") };
+            const data = sock.sockRecv(self.alloc, self.io, id, max) catch |err| {
+                return self.socketFail("recv", err);
+            };
+            return Value{ .string = data };
+        }
+        if (std.mem.eql(u8, method, "recv_line")) {
+            if (arg_vals.len != 1 or arg_vals[0] != .number) return ParseError.TypeError;
+            const id: u32 = @intFromFloat(@max(0, arg_vals[0].number));
+            if (self.dry) return Value{ .string = try self.alloc.dupe(u8, "") };
+            const data = sock.sockRecvLine(self.alloc, self.io, id) catch |err| {
+                return self.socketFail("recv_line", err);
+            };
+            return Value{ .string = data };
+        }
+        if (std.mem.eql(u8, method, "close")) {
+            if (arg_vals.len != 1 or arg_vals[0] != .number) return ParseError.TypeError;
+            const id: u32 = @intFromFloat(@max(0, arg_vals[0].number));
+            if (self.dry) return Value{ .nil = {} };
+            if (!sock.sockClose(self.io, id)) {
+                if (!self.mute) std.debug.print("error on line {d}: no such socket\n", .{self.line});
+                return ParseError.TypeError;
+            }
+            return Value{ .nil = {} };
+        }
+        if (!self.mute) std.debug.print("error on line {d}: unknown socket.{s} (have connect/listen/accept/send/recv/recv_line/close)\n", .{ self.line, method });
+        return ParseError.UnknownFunction;
+    }
+
+    fn socketPort(self: *Parser, v: Value) ?u16 {
+        _ = self;
+        if (v != .number) return null;
+        const n = v.number;
+        if (n != @trunc(n) or n < 1 or n > 65535) return null;
+        return @intFromFloat(n);
+    }
+
+    fn socketFail(self: *Parser, comptime op: []const u8, err: anyerror) anyerror {
+        if (err == error.UnknownHostName) {
+            const msg = std.fmt.allocPrint(self.alloc, "socket {s} dns lookup failed", .{op}) catch {
+                return ParseError.UnknownFunction;
+            };
+            if (self.err) |e| e.fail_msg = msg;
+            return ParseError.FailSignal;
+        }
+        if (err == error.Unexpected or err == error.ConnectionRefused or err == error.NetworkUnreachable or err == error.ConnectionResetByPeer or err == error.ConnectionTimedOut) {
+            const msg = std.fmt.allocPrint(self.alloc, "socket {s} connection failed", .{op}) catch {
+                return ParseError.UnknownFunction;
+            };
+            if (self.err) |e| e.fail_msg = msg;
+            return ParseError.FailSignal;
+        }
+        const msg = std.fmt.allocPrint(self.alloc, "socket {s} failed: {s}", .{ op, @errorName(err) }) catch {
+            return ParseError.UnknownFunction;
+        };
+        if (self.err) |e| e.fail_msg = msg;
+        return ParseError.FailSignal;
+    }
+
     fn callModuleMethod(self: *Parser, module: []const u8, method: []const u8, arg_vals: []const Value) anyerror!Value {
         if (std.mem.eql(u8, module, "physics")) {
             return try self.callPhysicsMethod(method, arg_vals);
@@ -2849,6 +2990,12 @@ const Parser = struct {
         }
         if (std.mem.eql(u8, module, "strings")) {
             return try self.callStringsMethod(method, arg_vals);
+        }
+        if (std.mem.eql(u8, module, "csv")) {
+            return try self.callCsvMethod(method, arg_vals);
+        }
+        if (std.mem.eql(u8, module, "socket")) {
+            return try self.callSocketMethod(method, arg_vals);
         }
         if (std.mem.eql(u8, module, "http")) {
             return try self.callHttpMethod(method, arg_vals);
@@ -5343,6 +5490,132 @@ const Parser = struct {
         return ParseError.UnknownFunction;
     }
 
+    fn callCsvMethod(self: *Parser, method: []const u8, arg_vals: []const Value) anyerror!Value {
+        if (!self.imported_csv) {
+            if (!self.mute) std.debug.print("error on line {d}: 'csv' used without 'import csv'\n", .{self.line});
+            return ParseError.UnknownKeyword;
+        }
+        if (std.mem.eql(u8, method, "parse")) {
+            if ((arg_vals.len != 1 and arg_vals.len != 2) or arg_vals[0] != .string) return ParseError.TypeError;
+            var d: u8 = ',';
+            if (arg_vals.len == 2) {
+                if (arg_vals[1] != .string or arg_vals[1].string.len != 1) return ParseError.TypeError;
+                d = arg_vals[1].string[0];
+            }
+            return try self.csvParse(arg_vals[0].string, d);
+        }
+        if (std.mem.eql(u8, method, "stringify")) {
+            if ((arg_vals.len != 1 and arg_vals.len != 2) or arg_vals[0] != .list) return ParseError.TypeError;
+            var d: u8 = ',';
+            if (arg_vals.len == 2) {
+                if (arg_vals[1] != .string or arg_vals[1].string.len != 1) return ParseError.TypeError;
+                d = arg_vals[1].string[0];
+            }
+            return try self.csvStringify(arg_vals[0], d);
+        }
+        if (!self.mute) std.debug.print("error on line {d}: unknown csv.{s} (have parse/stringify)\n", .{ self.line, method });
+        return ParseError.UnknownFunction;
+    }
+
+    fn csvParse(self: *Parser, s: []const u8, d: u8) anyerror!Value {
+        const rows = try self.alloc.create(ListObj);
+        rows.* = .{ .items = .empty };
+        var cur = try self.alloc.create(ListObj);
+        cur.* = .{ .items = .empty };
+        var buf: std.ArrayList(u8) = .empty;
+        var inq = false;
+        var started = false;
+        var rowlen: usize = 0;
+        var i: usize = 0;
+        while (true) {
+            const at_end = i >= s.len;
+            const ch: u8 = if (at_end) 0 else s[i];
+            if (!at_end and inq) {
+                if (ch == '"') {
+                    if (i + 1 < s.len and s[i + 1] == '"') {
+                        try buf.append(self.alloc, '"');
+                        i += 2;
+                        continue;
+                    }
+                    inq = false;
+                    i += 1;
+                    continue;
+                }
+                try buf.append(self.alloc, ch);
+                i += 1;
+                continue;
+            }
+            if (!at_end and ch == '"') {
+                inq = true;
+                started = true;
+                i += 1;
+                continue;
+            }
+            if (!at_end and ch == d) {
+                try cur.items.append(self.alloc, Value{ .string = try self.alloc.dupe(u8, buf.items) });
+                buf.clearRetainingCapacity();
+                rowlen += 1;
+                started = false;
+                i += 1;
+                continue;
+            }
+            if (!at_end and (ch == '\n' or ch == '\r')) {
+                try cur.items.append(self.alloc, Value{ .string = try self.alloc.dupe(u8, buf.items) });
+                buf.clearRetainingCapacity();
+                rowlen += 1;
+                started = false;
+                try rows.items.append(self.alloc, Value{ .list = cur });
+                cur = try self.alloc.create(ListObj);
+                cur.* = .{ .items = .empty };
+                rowlen = 0;
+                if (ch == '\r' and i + 1 < s.len and s[i + 1] == '\n') i += 1;
+                i += 1;
+                continue;
+            }
+            if (at_end) {
+                if (buf.items.len > 0 or rowlen > 0 or started) {
+                    try cur.items.append(self.alloc, Value{ .string = try self.alloc.dupe(u8, buf.items) });
+                    try rows.items.append(self.alloc, Value{ .list = cur });
+                }
+                break;
+            }
+            try buf.append(self.alloc, ch);
+            started = true;
+            i += 1;
+        }
+        return Value{ .list = rows };
+    }
+
+    fn csvStringify(self: *Parser, rows: Value, d: u8) anyerror!Value {
+        var buf: std.ArrayList(u8) = .empty;
+        for (rows.list.items.items, 0..) |row, ri| {
+            if (row != .list) return ParseError.TypeError;
+            if (ri > 0) try buf.append(self.alloc, '\n');
+            for (row.list.items.items, 0..) |field, fi| {
+                const s = try self.valueToString(field);
+                if (fi > 0) try buf.append(self.alloc, d);
+                var need = false;
+                for (s) |b| {
+                    if (b == d or b == '"' or b == '\n' or b == '\r') {
+                        need = true;
+                        break;
+                    }
+                }
+                if (!need) {
+                    try buf.appendSlice(self.alloc, s);
+                } else {
+                    try buf.append(self.alloc, '"');
+                    for (s) |b| {
+                        if (b == '"') try buf.append(self.alloc, '"');
+                        try buf.append(self.alloc, b);
+                    }
+                    try buf.append(self.alloc, '"');
+                }
+            }
+        }
+        return Value{ .string = try buf.toOwnedSlice(self.alloc) };
+    }
+
     fn callHexMethod(self: *Parser, method: []const u8, arg_vals: []const Value) anyerror!Value {
         if (!self.imported_hex) {
             if (!self.mute) std.debug.print("error on line {d}: 'hex' used without 'import hex'\n", .{self.line});
@@ -6566,6 +6839,8 @@ const JsonParser = struct {
             .imported_hex = self.imported_hex,
             .imported_random = self.imported_random,
             .imported_strings = self.imported_strings,
+            .imported_csv = self.imported_csv,
+            .imported_socket = self.imported_socket,
             .imported_http = self.imported_http,
             .imported_vga = self.imported_vga,
             .imported_vgatogui = self.imported_vgatogui,

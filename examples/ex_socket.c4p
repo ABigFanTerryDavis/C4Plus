@@ -1,0 +1,16 @@
+# socket basics without a peer: listen, close, refused connect is catchable
+import socket
+let s = socket.listen(18481)
+print "listening"
+socket.close(s)
+print "closed"
+try {
+  socket.connect("127.0.0.1", 18481)
+} catch e {
+  print ("caught: " + e)
+}
+try {
+  socket.listen(99999)
+} catch e {
+  print ("caught: " + e)
+}

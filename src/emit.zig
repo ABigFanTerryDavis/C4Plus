@@ -1588,7 +1588,7 @@ pub const Emitter = struct {
         const mod = try self.parseIdent();
         try self.expectEnd();
         if (self.fs) return self.fail("import {s} not in freestanding emit", .{mod});
-        if (std.mem.eql(u8, mod, "os") or std.mem.eql(u8, mod, "physics") or std.mem.eql(u8, mod, "time") or std.mem.eql(u8, mod, "cpu") or std.mem.eql(u8, mod, "heap") or std.mem.eql(u8, mod, "json") or std.mem.eql(u8, mod, "hex") or std.mem.eql(u8, mod, "random") or std.mem.eql(u8, mod, "strings")) {
+        if (std.mem.eql(u8, mod, "os") or std.mem.eql(u8, mod, "physics") or std.mem.eql(u8, mod, "time") or std.mem.eql(u8, mod, "cpu") or std.mem.eql(u8, mod, "heap") or std.mem.eql(u8, mod, "json") or std.mem.eql(u8, mod, "hex") or std.mem.eql(u8, mod, "random") or std.mem.eql(u8, mod, "strings") or std.mem.eql(u8, mod, "csv")) {
             try self.mods.put(try self.alloc.dupe(u8, mod), true);
             return;
         }
@@ -1597,6 +1597,9 @@ pub const Emitter = struct {
         }
         if (std.mem.eql(u8, mod, "http")) {
             return self.fail("'http' is script-only (network); run it with c4c, not --emit-c", .{});
+        }
+        if (std.mem.eql(u8, mod, "socket")) {
+            return self.fail("'socket' is script-only (network); run it with c4c, not --emit-c", .{});
         }
         if (std.mem.eql(u8, mod, "vgatogui")) {
             return self.fail("'vgatogui' is script-only (VGA emulator window); run it with c4c, not --emit-c", .{});
@@ -2431,6 +2434,25 @@ pub const Emitter = struct {
                 }
             }
             if (cfn == null) return self.fail("unknown strings.{s} in emit v1", .{method});
+        } else if (std.mem.eql(u8, module, "csv")) {
+            if (!self.mods.contains("csv")) return self.fail("'csv' used without 'import csv'", .{});
+            if (std.mem.eql(u8, method, "parse")) {
+                if (args.len == 1) {
+                    return try std.fmt.allocPrint(self.alloc, "c4_csv_parse({s}, c4_str(\",\"))", .{args[0]});
+                } else if (args.len == 2) {
+                    return try std.fmt.allocPrint(self.alloc, "c4_csv_parse({s}, {s})", .{ args[0], args[1] });
+                }
+                return self.fail("csv.parse takes 1-2 args", .{});
+            }
+            if (std.mem.eql(u8, method, "stringify")) {
+                if (args.len == 1) {
+                    return try std.fmt.allocPrint(self.alloc, "c4_csv_stringify({s}, c4_str(\",\"))", .{args[0]});
+                } else if (args.len == 2) {
+                    return try std.fmt.allocPrint(self.alloc, "c4_csv_stringify({s}, {s})", .{ args[0], args[1] });
+                }
+                return self.fail("csv.stringify takes 1-2 args", .{});
+            }
+            return self.fail("unknown csv.{s} in emit v1", .{method});
         } else if (std.mem.eql(u8, module, "cpu")) {
             if (!self.mods.contains("cpu")) return self.fail("'cpu' used without 'import cpu'", .{});
             const known_cpu = [_][]const u8{ "new", "reg", "setreg", "load", "store", "step", "run" };
@@ -2443,6 +2465,8 @@ pub const Emitter = struct {
             if (cfn == null) return self.fail("unknown cpu.{s} in emit v1", .{method});
         } else if (std.mem.eql(u8, module, "http")) {
             return self.fail("'http' is script-only (network); run it with c4c, not --emit-c", .{});
+        } else if (std.mem.eql(u8, module, "socket")) {
+            return self.fail("'socket' is script-only (network); run it with c4c, not --emit-c", .{});
         } else if (std.mem.eql(u8, module, "vgatogui")) {
             return self.fail("'vgatogui' is script-only (VGA emulator window); run it with c4c, not --emit-c", .{});
         } else if (std.mem.eql(u8, module, "vga")) {

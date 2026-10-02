@@ -678,6 +678,152 @@ C4Val c4_join(C4Val l, C4Val sep) {
     v.str = o;
     return v;
 }
+static void csv_push_field(C4Val row, char *buf, size_t len) {
+    char *s = xmalloc(len + 1);
+    memcpy(s, buf, len);
+    s[len] = 0;
+    C4Val f;
+    f.t = C4_STR;
+    f.str = s;
+    list_push(row.list, f);
+}
+C4Val c4_csv_parse(C4Val s, C4Val sep) {
+    if (s.t != C4_STR || sep.t != C4_STR || strlen(sep.str) != 1)
+        c4_err("TypeError");
+    char d = sep.str[0];
+    C4Val rows = c4_list();
+    C4Val cur = c4_list();
+    size_t cap = 64, len = 0;
+    char *buf = xmalloc(cap);
+    int inq = 0, started = 0;
+    size_t rowlen = 0;
+    const char *p = s.str;
+    for (;;) {
+        int at_end = *p == 0;
+        char ch = *p;
+        if (!at_end && inq) {
+            if (ch == '"') {
+                if (p[1] == '"') {
+                    if (len + 1 >= cap) {
+                        cap *= 2;
+                        buf = realloc(buf, cap);
+                    }
+                    buf[len++] = '"';
+                    p += 2;
+                    continue;
+                }
+                inq = 0;
+                p++;
+                continue;
+            }
+            if (len + 1 >= cap) {
+                cap *= 2;
+                buf = realloc(buf, cap);
+            }
+            buf[len++] = ch;
+            p++;
+            continue;
+        }
+        if (!at_end && ch == '"') {
+            inq = 1;
+            started = 1;
+            p++;
+            continue;
+        }
+        if (!at_end && ch == d) {
+            csv_push_field(cur, buf, len);
+            len = 0;
+            rowlen++;
+            started = 0;
+            p++;
+            continue;
+        }
+        if (!at_end && (ch == '\n' || ch == '\r')) {
+            csv_push_field(cur, buf, len);
+            len = 0;
+            rowlen++;
+            started = 0;
+            list_push(rows.list, cur);
+            cur = c4_list();
+            rowlen = 0;
+            if (ch == '\r' && p[1] == '\n')
+                p++;
+            p++;
+            continue;
+        }
+        if (at_end) {
+            if (len > 0 || rowlen > 0 || started) {
+                csv_push_field(cur, buf, len);
+                list_push(rows.list, cur);
+            }
+            break;
+        }
+        if (len + 1 >= cap) {
+            cap *= 2;
+            buf = realloc(buf, cap);
+        }
+        buf[len++] = ch;
+        started = 1;
+        p++;
+    }
+    free(buf);
+    return rows;
+}
+C4Val c4_csv_stringify(C4Val rows, C4Val sep) {
+    if (rows.t != C4_LIST || sep.t != C4_STR || strlen(sep.str) != 1)
+        c4_err("TypeError");
+    char d = sep.str[0];
+    size_t cap = 64, len = 0;
+    char *o = xmalloc(cap);
+    for (size_t ri = 0; ri < rows.list->len; ri++) {
+        C4Val row = rows.list->items[ri];
+        if (row.t != C4_LIST)
+            c4_err("TypeError");
+        if (ri > 0) {
+            if (len + 1 >= cap) {
+                cap *= 2;
+                o = realloc(o, cap);
+            }
+            o[len++] = '\n';
+        }
+        for (size_t fi = 0; fi < row.list->len; fi++) {
+            char *s = c4_tostring(row.list->items[fi]);
+            size_t sl = strlen(s);
+            int need = 0;
+            for (size_t k = 0; k < sl; k++) {
+                if (s[k] == d || s[k] == '"' || s[k] == '\n' || s[k] == '\r') {
+                    need = 1;
+                    break;
+                }
+            }
+            size_t extra = need ? 2 : 0;
+            for (size_t k = 0; k < sl; k++)
+                if (s[k] == '"')
+                    extra++;
+            while (len + sl + extra + 2 >= cap) {
+                cap *= 2;
+                o = realloc(o, cap);
+            }
+            if (fi > 0)
+                o[len++] = d;
+            if (need)
+                o[len++] = '"';
+            for (size_t k = 0; k < sl; k++) {
+                if (s[k] == '"')
+                    o[len++] = '"';
+                o[len++] = s[k];
+            }
+            if (need)
+                o[len++] = '"';
+            free(s);
+        }
+    }
+    o[len] = 0;
+    C4Val v;
+    v.t = C4_STR;
+    v.str = o;
+    return v;
+}
 C4Val c4_substr(C4Val s, C4Val a, C4Val b) {
     if (s.t != C4_STR || a.t != C4_NUM || b.t != C4_NUM)
         c4_err("TypeError");

@@ -1,0 +1,12 @@
+# 68_chat — TCP client for 67_socket: connect, say hi, read the echo.
+# Start 67_socket.c4p first (it blocks in accept), then run this.
+# Message framing is the app's job: we speak lines (recv_line), the
+# server echoes one line back. Raw socket.recv(c, max) blocks for up
+# to max bytes instead (use it with length prefixes or close-delimits).
+
+import socket
+let c = socket.connect("127.0.0.1", 18482)
+print ("sent=" + str(socket.send(c, "hi there\n")))
+print ("got=" + socket.recv_line(c))
+socket.close(c)
+print "chat done"
