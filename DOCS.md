@@ -1,4 +1,4 @@
-# C4Plus — Complete Docs (v0.4.1)
+# C4Plus — Complete Docs (v0.4.2)
 
 C4Plus (`.c4p`) is a small scripting language with headers (`.c4h`),
 assembly sidecars (`.c4asm`), batch files (`.c4bht`), projects
@@ -346,6 +346,44 @@ socket.close(c)
 socket.listen(8080)        # -> server handle (127.0.0.1 default)
 socket.accept(s)           # blocks until a client arrives -> handle
 # DNS/connect/refused/reset failures are catchable with try/catch
+
+import mem                 # arenas + slab pools (compiles to native too)
+let a = mem.arena(4096)    # -> handle; bump alloc, 4-aligned
+let o = mem.alloc(a, 64)   # -> offset, or -1 when full
+mem.write_u32(a, o, 1234)
+mem.read_u16(a, o)         # also read/write_u8/u32, fill, copy
+mem.usage(a)               # -> {size, used, peak, units}
+let p = mem.pool(32, 8)    # 8 slots of 32 bytes
+mem.acquire(p)             # -> slot index, or -1 when empty
+mem.release(p, 0)          # -> 1 (0 on double free)
+# out of bounds is catchable; exhaustion returns -1/0 (data, like heap)
+
+import block               # sector devices, 512B sectors (native too)
+let d = block.ramdisk(8)   # -> handle; or block.file(path, n)
+block.write_text(d, 0, "hi")
+block.read_text(d, 0)      # text stops at first zero byte
+block.read(d, 0)           # -> list of 512 byte-numbers (NUL-safe)
+block.write(d, 1, block.read(d, 0))
+block.copy(d, 2, 0, 1)
+block.fill(d, 3, 1, 0)
+block.stats(d)             # -> {sectors, reads, writes}
+block.flush(d)
+block.close(d)
+# out of range is catchable with try/catch
+
+import task                # cooperative tasks, script-only like socket
+task.spawn("worker")       # named zero-arg fn -> id (unknown fn catchable)
+task.yield()               # hand control back; fn restarts next step
+task.exit()                # kill current task (returning ends it too)
+task.sleep(0.5)            # suspend until time passes (yields)
+let ch = task.chan()       # buffered channel for values
+task.send(ch, "msg")
+task.recv(ch)              # -> value, or nil when empty
+task.run()                 # steps until no task alive (run(n) caps steps)
+task.step()                # one round over live tasks -> steps run
+task.self()                # current id, -1 outside; alive(id), list()
+# protothread style: locals do not survive yield, keep state in globals.
+# no mutexes needed: a step never preempts another step.
 ```
 
 ## 7. Assembly side by side (`.c4asm`)
@@ -530,6 +568,8 @@ or native-mode for these):
 * `vgatogui` (VGA emulator window — script-only; `import vga` works in
   scripts with a window open, kernels use bare `vga_*` builtins)
 * `socket` (TCP — script-only)
+* `task` (cooperative tasks — script-only: task bodies need shared
+  state, and emitted functions cannot see globals)
 * closures capturing locals (top-level function values compile and
   call fine; only captured-variable capture stays script-side)
 * `#target sim` needs the `cpu` module... no wait, `cpu` compiles.
@@ -581,7 +621,17 @@ for the ELF loader); same VGA calls as a module for scripts via
 `68_chat` client: `connect/listen/accept/send/recv/recv_line/close`,
 catchable errors, `examples/ex_socket.c4p`); CSV tables
 (`csv.parse/stringify`, quoted fields, custom separators,
-compiles to native too, `examples/ex_csv.c4p`).
+compiles to native too, `examples/ex_csv.c4p`). Cooperative tasks
+(`71_task`, `examples/ex_task.c4p`: `spawn/yield/exit/sleep` over named
+functions run as steps, `chan/send/recv` channels, `run/step` scheduler,
+`self/alive/list`; protothread-style — locals do not survive yield, no
+mutexes since steps never preempt; script-only because emitted functions
+cannot see globals). Memory allocators (`69_mem`, `examples/ex_mem.c4p`:
+`arena/pool/alloc/acquire/release`, typed `read/write_u8/u16/u32`,
+`fill/copy/usage/reset`, compiles to native). Block storage (`70_block`,
+`examples/ex_block.c4p`: `ramdisk/file/read/write/read_text/write_text/
+sectors/flush/close/copy/fill/stats` over 512-byte sectors as number
+lists, compiles to native).
 
 Freestanding extras for kernel code (`--emit-c --freestanding`
 only — clean errors elsewhere): `outb(port, val)`, `inb(port)`, `inw(port)` (16-bit),

@@ -1,0 +1,48 @@
+# 71_task — cooperative tasks: spawn, yield, channels, sleep.
+#
+# Tasks are named zero-arg functions run as STEPS: each step calls every
+# live task's function once. task.yield() hands control back (the function
+# restarts from the top next step — protothread style), task.exit() kills
+# the task, returning from the function finishes it. Progress lives in
+# globals because locals do not survive yield. No mutexes are needed:
+# a step never preempts another step, so shared lists are race-free.
+# Channels (task.chan/send/recv) move values; recv on empty is nil.
+# This is the user-facing twin of the 59_sched rendezvous scheduler.
+# Script-only: task bodies need shared state, which --emit-c cannot see.
+
+import task
+
+let inbox = task.chan()
+let done = []
+let n = 0
+
+fn worker() {
+  if n == 0 { task.send(inbox, "one") }
+  if n == 1 { task.send(inbox, "two") }
+  if n == 2 {
+    task.send(inbox, "three")
+    task.exit()
+  }
+  n = n + 1
+  task.sleep(0)
+}
+
+fn collector() {
+  let m = task.recv(inbox)
+  while m != nil {
+    push(done, m)
+    if len(done) == 3 {
+      task.exit()
+    }
+    m = task.recv(inbox)
+  }
+  task.yield()
+}
+
+task.spawn("worker")
+task.spawn("collector")
+print ("live=" + str(len(task.list())))
+task.run()
+print done
+print ("live=" + str(len(task.list())))
+print "all tasks done"

@@ -1,0 +1,19 @@
+# block basics: ramdisk sectors, text + binary access, copy/fill, stats
+import block
+let d = block.ramdisk(8)
+print ("n=" + str(block.sectors(d)))
+block.write_text(d, 0, "hello disk")
+print ("t0=" + block.read_text(d, 0))
+let s = block.read(d, 0)
+print ("len=" + str(len(s)))
+print ("b=" + str(s[0]) + "," + str(s[1]) + "," + str(s[4]))
+block.fill(d, 2, 2, 65)
+print ("f0=" + str(block.read(d, 2)[0]))
+block.copy(d, 4, 0, 1)
+print ("c=" + block.read_text(d, 4))
+block.write(d, 6, block.read(d, 0))
+print ("w=" + block.read_text(d, 6))
+print block.stats(d)
+try { block.read(d, 99) } catch e { print ("caught: " + e) }
+block.close(d)
+print "closed"

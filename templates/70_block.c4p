@@ -1,0 +1,45 @@
+# 70_block — the storage stack: format a volume, write a superblock,
+# copy it, back it with a real file. The kernel side of this story is
+# 61_ata (raw sector reads) + 62_fat (a filesystem on top); this module
+# is the hosted twin: same sector discipline, ramdisk or disk image.
+#
+# Sectors cross as lists of 512 byte-numbers (C strings can't hold NULs),
+# with read_text/write_text for the NUL-free case. Same calls compile
+# to native (c4_block_* in rt/c4rt.c).
+
+import block
+import os
+
+# format: 16 blank sectors, superblock in 0 (magic + version + label).
+let d = block.ramdisk(16)
+block.fill(d, 0, 16, 0)
+block.write_text(d, 0, "C4FS v1")
+print ("sb=" + block.read_text(d, 0))
+block.write_text(d, 1, "hello from sector 1")
+block.copy(d, 2, 1, 1)
+print ("mirror=" + block.read_text(d, 2))
+print ("n=" + str(block.sectors(d)))
+
+# binary is exact: every byte round-trips, zeros included.
+let raw = block.read(d, 0)
+print ("len=" + str(len(raw)))
+print ("magic=" + str(raw[0]) + "," + str(raw[1]) + "," + str(raw[5]))
+print ("zero=" + str(raw[7]))
+print block.stats(d)
+
+# file-backed: the image survives close; reopen reads it back.
+let img = "70_disk.img"
+let f = block.file(img, 4)
+block.write_text(f, 3, "persistent")
+block.flush(f)
+block.close(f)
+let g = block.file(img, 0)
+print ("back=" + block.read_text(g, 3))
+print ("gn=" + str(block.sectors(g)))
+block.close(g)
+os.remove(img)
+print "cleaned"
+
+# out of range is catchable, like mem out of bounds.
+try { block.write_text(d, 99, "x") } catch e { print ("caught: " + e) }
+block.close(d)

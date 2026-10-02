@@ -30,6 +30,16 @@ fn addTool(
         .target = target,
         .optimize = optimize,
     });
+    const mem_mod = b.createModule(.{
+        .root_source_file = b.path("src/mem.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const block_mod = b.createModule(.{
+        .root_source_file = b.path("src/block.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
     const exe = b.addExecutable(.{
         .name = name,
         .root_module = b.createModule(.{
@@ -42,6 +52,8 @@ fn addTool(
                 .{ .name = "gui", .module = gui_mod },
                 .{ .name = "proc", .module = proc_mod },
                 .{ .name = "sock", .module = sock_mod },
+                .{ .name = "mem", .module = mem_mod },
+                .{ .name = "block", .module = block_mod },
             },
         }),
     });
@@ -57,7 +69,7 @@ fn addTool(
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const version = "0.4.1";
+    const version = "0.4.2";
 
     const c4c = addTool(b, "c4c", version, target, optimize);
     _ = addTool(b, "c4pp", version, target, optimize);

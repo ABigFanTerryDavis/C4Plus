@@ -1588,7 +1588,7 @@ pub const Emitter = struct {
         const mod = try self.parseIdent();
         try self.expectEnd();
         if (self.fs) return self.fail("import {s} not in freestanding emit", .{mod});
-        if (std.mem.eql(u8, mod, "os") or std.mem.eql(u8, mod, "physics") or std.mem.eql(u8, mod, "time") or std.mem.eql(u8, mod, "cpu") or std.mem.eql(u8, mod, "heap") or std.mem.eql(u8, mod, "json") or std.mem.eql(u8, mod, "hex") or std.mem.eql(u8, mod, "random") or std.mem.eql(u8, mod, "strings") or std.mem.eql(u8, mod, "csv")) {
+        if (std.mem.eql(u8, mod, "os") or std.mem.eql(u8, mod, "physics") or std.mem.eql(u8, mod, "time") or std.mem.eql(u8, mod, "cpu") or std.mem.eql(u8, mod, "heap") or std.mem.eql(u8, mod, "json") or std.mem.eql(u8, mod, "hex") or std.mem.eql(u8, mod, "random") or std.mem.eql(u8, mod, "strings") or std.mem.eql(u8, mod, "csv") or std.mem.eql(u8, mod, "mem") or std.mem.eql(u8, mod, "block")) {
             try self.mods.put(try self.alloc.dupe(u8, mod), true);
             return;
         }
@@ -1600,6 +1600,9 @@ pub const Emitter = struct {
         }
         if (std.mem.eql(u8, mod, "socket")) {
             return self.fail("'socket' is script-only (network); run it with c4c, not --emit-c", .{});
+        }
+        if (std.mem.eql(u8, mod, "task")) {
+            return self.fail("'task' is script-only (cooperative tasks need shared state); run it with c4c, not --emit-c", .{});
         }
         if (std.mem.eql(u8, mod, "vgatogui")) {
             return self.fail("'vgatogui' is script-only (VGA emulator window); run it with c4c, not --emit-c", .{});
@@ -2453,6 +2456,28 @@ pub const Emitter = struct {
                 return self.fail("csv.stringify takes 1-2 args", .{});
             }
             return self.fail("unknown csv.{s} in emit v1", .{method});
+        } else if (std.mem.eql(u8, module, "mem")) {
+            if (!self.mods.contains("mem")) return self.fail("'mem' used without 'import mem'", .{});
+            const known_mem = [_][]const u8{ "arena", "pool", "alloc", "acquire", "release", "read_u8", "read_u16", "read_u32", "write_u8", "write_u16", "write_u32", "fill", "copy", "usage", "reset" };
+            for (known_mem) |k| {
+                if (std.mem.eql(u8, method, k)) {
+                    cfn = try std.fmt.allocPrint(self.alloc, "c4_mem_{s}", .{method});
+                    break;
+                }
+            }
+            if (cfn == null) return self.fail("unknown mem.{s} in emit v1", .{method});
+        } else if (std.mem.eql(u8, module, "block")) {
+            if (!self.mods.contains("block")) return self.fail("'block' used without 'import block'", .{});
+            const known_block = [_][]const u8{ "ramdisk", "file", "read", "write", "read_text", "write_text", "sectors", "flush", "close", "copy", "fill", "stats" };
+            for (known_block) |k| {
+                if (std.mem.eql(u8, method, k)) {
+                    cfn = try std.fmt.allocPrint(self.alloc, "c4_block_{s}", .{method});
+                    break;
+                }
+            }
+            if (cfn == null) return self.fail("unknown block.{s} in emit v1", .{method});
+        } else if (std.mem.eql(u8, module, "task")) {
+            return self.fail("'task' is script-only (cooperative tasks need shared state); run it with c4c, not --emit-c", .{});
         } else if (std.mem.eql(u8, module, "cpu")) {
             if (!self.mods.contains("cpu")) return self.fail("'cpu' used without 'import cpu'", .{});
             const known_cpu = [_][]const u8{ "new", "reg", "setreg", "load", "store", "step", "run" };

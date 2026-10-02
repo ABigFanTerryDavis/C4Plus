@@ -2141,6 +2141,531 @@ C4Val c4_heap_dump(C4Val h) {
     return o;
 }
 
+/* ======== mem module (0.4.2): arena bump + slab pools over byte regions.
+   Handles are 1-based ints into a static table. Errors that the interpreter
+   reports as catchable FailSignal go through c4_fail with identical text;
+   programming errors (bad handle/type) go through c4_err("TypeError"). ======== */
+
+#define C4_MEM_MAX 32
+#define C4_MEM_MAXBYTES ((size_t)16 * 1024 * 1024)
+
+typedef struct {
+    int used, is_pool;
+    unsigned char *buf;
+    size_t len, bump, peak, allocs;
+    size_t objsz, count, live, free_top;
+    unsigned *stack;
+} C4MemReg;
+
+static C4MemReg c4_mem_regs[C4_MEM_MAX];
+
+static void c4_mem_fail(const char *op, const char *msg) {
+    char b[128];
+    snprintf(b, sizeof b, "mem %s %s", op, msg);
+    c4_fail(b);
+}
+
+static long c4_mem_int(C4Val v) {
+    if (v.t != C4_NUM || v.num != trunc(v.num) || v.num < 0 || v.num > 9007199254740991.0)
+        c4_err("TypeError");
+    return (long)v.num;
+}
+
+static C4MemReg *c4_mem_reg(C4Val h, const char *op) {
+    long id = c4_mem_int(h);
+    if (id < 1 || id > C4_MEM_MAX || !c4_mem_regs[id - 1].used)
+        c4_err("TypeError");
+    (void)op;
+    return &c4_mem_regs[id - 1];
+}
+
+static void c4_mem_range(C4MemReg *r, size_t off, size_t n, const char *op) {
+    if (n > r->len || off > r->len - n)
+        c4_mem_fail(op, "out of bounds");
+}
+
+C4Val c4_mem_arena(C4Val n) {
+    long size = c4_mem_int(n);
+    if ((unsigned long)size > C4_MEM_MAXBYTES)
+        c4_mem_fail("arena", "too big (max 16M)");
+    int id = -1;
+    for (int i = 0; i < C4_MEM_MAX; i++)
+        if (!c4_mem_regs[i].used) {
+            id = i;
+            break;
+        }
+    if (id < 0)
+        c4_mem_fail("arena", "out of memory");
+    C4MemReg *r = &c4_mem_regs[id];
+    memset(r, 0, sizeof *r);
+    r->used = 1;
+    r->len = (size_t)size;
+    r->buf = r->len ? calloc(1, r->len) : NULL;
+    if (r->len && !r->buf)
+        c4_mem_fail("arena", "out of memory");
+    return c4_num((double)(id + 1));
+}
+
+C4Val c4_mem_pool(C4Val o, C4Val c) {
+    long objsz = c4_mem_int(o), count = c4_mem_int(c);
+    if (objsz <= 0 || count <= 0)
+        c4_err("TypeError");
+    if ((unsigned long)objsz > C4_MEM_MAXBYTES / (unsigned long)count)
+        c4_mem_fail("pool", "too big (max 16M)");
+    int id = -1;
+    for (int i = 0; i < C4_MEM_MAX; i++)
+        if (!c4_mem_regs[i].used) {
+            id = i;
+            break;
+        }
+    if (id < 0)
+        c4_mem_fail("pool", "out of memory");
+    C4MemReg *r = &c4_mem_regs[id];
+    memset(r, 0, sizeof *r);
+    r->used = 1;
+    r->is_pool = 1;
+    r->objsz = (size_t)objsz;
+    r->count = (size_t)count;
+    r->len = r->objsz * r->count;
+    r->buf = calloc(1, r->len);
+    r->stack = malloc(sizeof(unsigned) * r->count);
+    if (!r->buf || !r->stack) {
+        free(r->buf);
+        free(r->stack);
+        memset(r, 0, sizeof *r);
+        c4_mem_fail("pool", "out of memory");
+    }
+    for (size_t i = 0; i < r->count; i++)
+        r->stack[i] = (unsigned)(r->count - 1 - i);
+    r->free_top = r->count;
+    return c4_num((double)(id + 1));
+}
+
+C4Val c4_mem_alloc(C4Val h, C4Val n) {
+    C4MemReg *r = c4_mem_reg(h, "alloc");
+    if (r->is_pool)
+        c4_mem_fail("alloc", "needs arena");
+    long nn = c4_mem_int(n);
+    if (nn <= 0)
+        c4_err("TypeError");
+    size_t aligned = (r->bump + 3) & ~(size_t)3;
+    if ((unsigned long)nn > C4_MEM_MAXBYTES || aligned > r->len || (size_t)nn > r->len - aligned)
+        return c4_num(-1);
+    r->bump = aligned + (size_t)nn;
+    r->allocs++;
+    if (r->bump > r->peak)
+        r->peak = r->bump;
+    return c4_num((double)aligned);
+}
+
+C4Val c4_mem_acquire(C4Val h) {
+    C4MemReg *r = c4_mem_reg(h, "acquire");
+    if (!r->is_pool)
+        c4_mem_fail("acquire", "needs pool");
+    if (r->free_top == 0)
+        return c4_num(-1);
+    r->free_top--;
+    r->live++;
+    if (r->live * r->objsz > r->peak)
+        r->peak = r->live * r->objsz;
+    return c4_num((double)r->stack[r->free_top]);
+}
+
+C4Val c4_mem_release(C4Val h, C4Val i) {
+    C4MemReg *r = c4_mem_reg(h, "release");
+    if (!r->is_pool)
+        c4_mem_fail("release", "needs pool");
+    long idx = c4_mem_int(i);
+    if (idx < 0 || (unsigned long)idx >= r->count)
+        c4_mem_fail("release", "bad slot");
+    for (size_t k = 0; k < r->free_top; k++)
+        if ((long)r->stack[k] == idx)
+            return c4_num(0);
+    r->stack[r->free_top++] = (unsigned)idx;
+    r->live--;
+    return c4_num(1);
+}
+
+static C4Val c4_mem_read(C4Val h, C4Val o, unsigned width) {
+    C4MemReg *r = c4_mem_reg(h, "read");
+    long off = c4_mem_int(o);
+    if (off < 0 || (unsigned long)off > C4_MEM_MAXBYTES)
+        c4_mem_fail("read", "out of bounds");
+    c4_mem_range(r, (size_t)off, width, "read");
+    unsigned long v = 0;
+    for (unsigned k = 0; k < width; k++)
+        v |= (unsigned long)r->buf[(size_t)off + k] << (8 * k);
+    return c4_num((double)v);
+}
+
+C4Val c4_mem_read_u8(C4Val h, C4Val o) {
+    return c4_mem_read(h, o, 1);
+}
+C4Val c4_mem_read_u16(C4Val h, C4Val o) {
+    return c4_mem_read(h, o, 2);
+}
+C4Val c4_mem_read_u32(C4Val h, C4Val o) {
+    return c4_mem_read(h, o, 4);
+}
+
+static void c4_mem_write(C4Val h, C4Val o, C4Val v, unsigned width, unsigned long cap) {
+    C4MemReg *r = c4_mem_reg(h, "write");
+    long off = c4_mem_int(o);
+    if (off < 0 || (unsigned long)off > C4_MEM_MAXBYTES)
+        c4_mem_fail("write", "out of bounds");
+    if (v.t != C4_NUM || v.num != trunc(v.num) || v.num < 0 || v.num > (double)cap)
+        c4_err("TypeError");
+    c4_mem_range(r, (size_t)off, width, "write");
+    unsigned long val = (unsigned long)v.num;
+    for (unsigned k = 0; k < width; k++)
+        r->buf[(size_t)off + k] = (unsigned char)((val >> (8 * k)) & 0xFF);
+}
+
+C4Val c4_mem_write_u8(C4Val h, C4Val o, C4Val v) {
+    c4_mem_write(h, o, v, 1, 255);
+    return c4_nil();
+}
+C4Val c4_mem_write_u16(C4Val h, C4Val o, C4Val v) {
+    c4_mem_write(h, o, v, 2, 65535);
+    return c4_nil();
+}
+C4Val c4_mem_write_u32(C4Val h, C4Val o, C4Val v) {
+    c4_mem_write(h, o, v, 4, 4294967295UL);
+    return c4_nil();
+}
+
+C4Val c4_mem_fill(C4Val h, C4Val o, C4Val n, C4Val b) {
+    C4MemReg *r = c4_mem_reg(h, "fill");
+    long off = c4_mem_int(o), nn = c4_mem_int(n);
+    if (b.t != C4_NUM || b.num != trunc(b.num) || b.num < 0 || b.num > 255)
+        c4_err("TypeError");
+    if (off < 0 || nn < 0 || (unsigned long)off > C4_MEM_MAXBYTES || (unsigned long)nn > C4_MEM_MAXBYTES)
+        c4_mem_fail("fill", "out of bounds");
+    c4_mem_range(r, (size_t)off, (size_t)nn, "fill");
+    memset(r->buf + off, (int)b.num, (size_t)nn);
+    return c4_nil();
+}
+
+C4Val c4_mem_copy(C4Val h, C4Val d, C4Val s, C4Val n) {
+    C4MemReg *r = c4_mem_reg(h, "copy");
+    long dst = c4_mem_int(d), src = c4_mem_int(s), nn = c4_mem_int(n);
+    if (dst < 0 || src < 0 || nn < 0 || (unsigned long)dst > C4_MEM_MAXBYTES || (unsigned long)src > C4_MEM_MAXBYTES || (unsigned long)nn > C4_MEM_MAXBYTES)
+        c4_mem_fail("copy", "out of bounds");
+    c4_mem_range(r, (size_t)dst, (size_t)nn, "copy");
+    c4_mem_range(r, (size_t)src, (size_t)nn, "copy");
+    memmove(r->buf + dst, r->buf + src, (size_t)nn);
+    return c4_nil();
+}
+
+C4Val c4_mem_usage(C4Val h) {
+    C4MemReg *r = c4_mem_reg(h, "usage");
+    size_t used = r->is_pool ? r->live * r->objsz : r->bump;
+    size_t units = r->is_pool ? r->live : r->allocs;
+    C4Val st = c4_dict();
+    dict_put(st.dict, "size", c4_num((double)r->len));
+    dict_put(st.dict, "used", c4_num((double)used));
+    dict_put(st.dict, "peak", c4_num((double)r->peak));
+    dict_put(st.dict, "units", c4_num((double)units));
+    return st;
+}
+
+C4Val c4_mem_reset(C4Val h) {
+    C4MemReg *r = c4_mem_reg(h, "reset");
+    if (r->is_pool) {
+        for (size_t i = 0; i < r->count; i++)
+            r->stack[i] = (unsigned)(r->count - 1 - i);
+        r->free_top = r->count;
+        r->live = 0;
+    } else {
+        r->bump = 0;
+        r->allocs = 0;
+    }
+    if (r->len)
+        memset(r->buf, 0, r->len);
+    return c4_nil();
+}
+
+/* ======== block module (0.4.2): sector devices (ramdisk + file images).
+   Sectors cross as lists of 512 byte-numbers (C strings can't hold NULs);
+   read_text/write_text cut at the first zero byte on both sides. ======== */
+
+#define C4_BLOCK_MAX 32
+#define C4_BLOCK_SECTOR 512
+#define C4_BLOCK_MAXSECTORS 131072
+
+typedef struct {
+    int used, is_file;
+    unsigned char *buf;
+    FILE *f;
+    size_t sectors, reads, writes;
+} C4BlockDev;
+
+static C4BlockDev c4_block_devs[C4_BLOCK_MAX];
+
+static void c4_block_fail(const char *op, const char *msg) {
+    char b[128];
+    snprintf(b, sizeof b, "block %s %s", op, msg);
+    c4_fail(b);
+}
+
+static C4BlockDev *c4_block_dev(C4Val h) {
+    long id = c4_mem_int(h);
+    if (id < 1 || id > C4_BLOCK_MAX || !c4_block_devs[id - 1].used)
+        c4_err("TypeError");
+    return &c4_block_devs[id - 1];
+}
+
+static void c4_block_range(C4BlockDev *d, long lba, long n, const char *op) {
+    if (lba < 0 || n < 0 || (unsigned long)lba > 2000000000UL || (unsigned long)n > 2000000000UL || (unsigned long)n > d->sectors || (unsigned long)lba > d->sectors - (unsigned long)n)
+        c4_block_fail(op, "out of range");
+}
+
+C4Val c4_block_ramdisk(C4Val n) {
+    long sectors = c4_mem_int(n);
+    if (sectors <= 0)
+        c4_err("TypeError");
+    if ((unsigned long)sectors > C4_BLOCK_MAXSECTORS)
+        c4_block_fail("ramdisk", "too big");
+    int id = -1;
+    for (int i = 0; i < C4_BLOCK_MAX; i++)
+        if (!c4_block_devs[i].used) {
+            id = i;
+            break;
+        }
+    if (id < 0)
+        c4_block_fail("ramdisk", "out of memory");
+    C4BlockDev *d = &c4_block_devs[id];
+    memset(d, 0, sizeof *d);
+    d->used = 1;
+    d->sectors = (size_t)sectors;
+    d->buf = calloc(d->sectors, C4_BLOCK_SECTOR);
+    if (!d->buf) {
+        memset(d, 0, sizeof *d);
+        c4_block_fail("ramdisk", "out of memory");
+    }
+    return c4_num((double)(id + 1));
+}
+
+C4Val c4_block_file(C4Val p, C4Val n) {
+    if (p.t != C4_STR)
+        c4_err("TypeError");
+    long sectors = c4_mem_int(n);
+    int id = -1;
+    for (int i = 0; i < C4_BLOCK_MAX; i++)
+        if (!c4_block_devs[i].used) {
+            id = i;
+            break;
+        }
+    if (id < 0)
+        c4_block_fail("file", "out of memory");
+    FILE *f = fopen(p.str, "r+b");
+    size_t actual = 0;
+    if (!f) {
+        if (sectors <= 0)
+            c4_err("TypeError");
+        if ((unsigned long)sectors > C4_BLOCK_MAXSECTORS)
+            c4_block_fail("file", "too big");
+        f = fopen(p.str, "w+b");
+        if (!f)
+            c4_block_fail("file", "file failed");
+        static unsigned char zero[4096];
+        memset(zero, 0, sizeof zero);
+        size_t want = (size_t)sectors * C4_BLOCK_SECTOR, done = 0;
+        while (done < want) {
+            size_t chunk = want - done > sizeof zero ? sizeof zero : want - done;
+            if (fwrite(zero, 1, chunk, f) != chunk) {
+                fclose(f);
+                c4_block_fail("file", "file failed");
+            }
+            done += chunk;
+        }
+        fflush(f);
+        actual = (size_t)sectors;
+    } else {
+        if (fseek(f, 0, SEEK_END) != 0) {
+            fclose(f);
+            c4_block_fail("file", "file failed");
+        }
+        long sz = ftell(f);
+        if (sz <= 0 || sz % C4_BLOCK_SECTOR != 0) {
+            fclose(f);
+            c4_block_fail("file", "file failed");
+        }
+        actual = (size_t)sz / C4_BLOCK_SECTOR;
+    }
+    C4BlockDev *d = &c4_block_devs[id];
+    memset(d, 0, sizeof *d);
+    d->used = 1;
+    d->is_file = 1;
+    d->f = f;
+    d->sectors = actual;
+    return c4_num((double)(id + 1));
+}
+
+C4Val c4_block_sectors(C4Val h) {
+    return c4_num((double)c4_block_dev(h)->sectors);
+}
+
+static void c4_block_get(C4BlockDev *d, unsigned char out[C4_BLOCK_SECTOR], long lba, const char *op) {
+    if (d->is_file) {
+        if (fseek(d->f, lba * C4_BLOCK_SECTOR, SEEK_SET) != 0)
+            c4_block_fail(op, "file failed");
+        if (fread(out, 1, C4_BLOCK_SECTOR, d->f) != C4_BLOCK_SECTOR)
+            c4_block_fail(op, "file failed");
+    } else {
+        memcpy(out, d->buf + (size_t)lba * C4_BLOCK_SECTOR, C4_BLOCK_SECTOR);
+    }
+    d->reads++;
+}
+
+static void c4_block_put(C4BlockDev *d, const unsigned char in[C4_BLOCK_SECTOR], long lba, const char *op) {
+    if (d->is_file) {
+        if (fseek(d->f, lba * C4_BLOCK_SECTOR, SEEK_SET) != 0)
+            c4_block_fail(op, "file failed");
+        if (fwrite(in, 1, C4_BLOCK_SECTOR, d->f) != C4_BLOCK_SECTOR)
+            c4_block_fail(op, "file failed");
+    } else {
+        memcpy(d->buf + (size_t)lba * C4_BLOCK_SECTOR, in, C4_BLOCK_SECTOR);
+    }
+    d->writes++;
+}
+
+C4Val c4_block_read(C4Val h, C4Val l) {
+    C4BlockDev *d = c4_block_dev(h);
+    long lba = c4_mem_int(l);
+    c4_block_range(d, lba, 1, "read");
+    unsigned char sec[C4_BLOCK_SECTOR];
+    c4_block_get(d, sec, lba, "read");
+    C4Val o = c4_list();
+    for (int i = 0; i < C4_BLOCK_SECTOR; i++)
+        list_push(o.list, c4_num((double)sec[i]));
+    return o;
+}
+
+static void c4_block_list_bytes(C4Val l, unsigned char out[C4_BLOCK_SECTOR], const char *op) {
+    if (l.t != C4_LIST || l.list->len != C4_BLOCK_SECTOR)
+        c4_err("TypeError");
+    for (size_t i = 0; i < C4_BLOCK_SECTOR; i++) {
+        C4Val v = l.list->items[i];
+        if (v.t != C4_NUM || v.num != trunc(v.num) || v.num < 0 || v.num > 255)
+            c4_err("TypeError");
+        out[i] = (unsigned char)v.num;
+    }
+    (void)op;
+}
+
+C4Val c4_block_write(C4Val h, C4Val l, C4Val data) {
+    C4BlockDev *d = c4_block_dev(h);
+    long lba = c4_mem_int(l);
+    c4_block_range(d, lba, 1, "write");
+    unsigned char sec[C4_BLOCK_SECTOR];
+    c4_block_list_bytes(data, sec, "write");
+    c4_block_put(d, sec, lba, "write");
+    return c4_nil();
+}
+
+C4Val c4_block_read_text(C4Val h, C4Val l) {
+    C4BlockDev *d = c4_block_dev(h);
+    long lba = c4_mem_int(l);
+    c4_block_range(d, lba, 1, "read_text");
+    unsigned char sec[C4_BLOCK_SECTOR];
+    c4_block_get(d, sec, lba, "read_text");
+    size_t end = 0;
+    while (end < C4_BLOCK_SECTOR && sec[end] != 0)
+        end++;
+    return c4_strn((const char *)sec, end);
+}
+
+C4Val c4_block_write_text(C4Val h, C4Val l, C4Val t) {
+    C4BlockDev *d = c4_block_dev(h);
+    long lba = c4_mem_int(l);
+    if (t.t != C4_STR)
+        c4_err("TypeError");
+    if (strlen(t.str) > C4_BLOCK_SECTOR)
+        c4_err("TypeError");
+    c4_block_range(d, lba, 1, "write_text");
+    unsigned char sec[C4_BLOCK_SECTOR];
+    memset(sec, 0, sizeof sec);
+    memcpy(sec, t.str, strlen(t.str));
+    c4_block_put(d, sec, lba, "write_text");
+    return c4_nil();
+}
+
+C4Val c4_block_copy(C4Val h, C4Val d_, C4Val s_, C4Val n_) {
+    C4BlockDev *d = c4_block_dev(h);
+    long dst = c4_mem_int(d_), src = c4_mem_int(s_), n = c4_mem_int(n_);
+    c4_block_range(d, dst, n, "copy");
+    c4_block_range(d, src, n, "copy");
+    if (d->is_file) {
+        unsigned char tmp[C4_BLOCK_SECTOR * 8];
+        long i = 0;
+        while (i < n) {
+            long chunk = n - i > 8 ? 8 : n - i;
+            for (long k = 0; k < chunk; k++)
+                c4_block_get(d, tmp + (size_t)k * C4_BLOCK_SECTOR, src + i + k, "copy");
+            for (long k = 0; k < chunk; k++)
+                c4_block_put(d, tmp + (size_t)k * C4_BLOCK_SECTOR, dst + i + k, "copy");
+            i += chunk;
+        }
+    } else {
+        memmove(d->buf + (size_t)dst * C4_BLOCK_SECTOR, d->buf + (size_t)src * C4_BLOCK_SECTOR, (size_t)n * C4_BLOCK_SECTOR);
+    }
+    d->reads += (size_t)n;
+    d->writes += (size_t)n;
+    return c4_nil();
+}
+
+C4Val c4_block_fill(C4Val h, C4Val l, C4Val n_, C4Val b) {
+    C4BlockDev *d = c4_block_dev(h);
+    long lba = c4_mem_int(l), n = c4_mem_int(n_);
+    if (b.t != C4_NUM || b.num != trunc(b.num) || b.num < 0 || b.num > 255)
+        c4_err("TypeError");
+    c4_block_range(d, lba, n, "fill");
+    if (d->is_file) {
+        unsigned char tmp[C4_BLOCK_SECTOR * 8];
+        memset(tmp, (int)b.num, sizeof tmp);
+        long i = 0;
+        while (i < n) {
+            long chunk = n - i > 8 ? 8 : n - i;
+            if (fseek(d->f, (lba + i) * C4_BLOCK_SECTOR, SEEK_SET) != 0)
+                c4_block_fail("fill", "file failed");
+            if (fwrite(tmp, 1, (size_t)chunk * C4_BLOCK_SECTOR, d->f) != (size_t)chunk * C4_BLOCK_SECTOR)
+                c4_block_fail("fill", "file failed");
+            i += chunk;
+        }
+    } else {
+        memset(d->buf + (size_t)lba * C4_BLOCK_SECTOR, (int)b.num, (size_t)n * C4_BLOCK_SECTOR);
+    }
+    d->writes += (size_t)n;
+    return c4_nil();
+}
+
+C4Val c4_block_flush(C4Val h) {
+    C4BlockDev *d = c4_block_dev(h);
+    if (d->is_file && fflush(d->f) != 0)
+        c4_block_fail("flush", "file failed");
+    return c4_nil();
+}
+
+C4Val c4_block_close(C4Val h) {
+    C4BlockDev *d = c4_block_dev(h);
+    if (d->is_file)
+        fclose(d->f);
+    else
+        free(d->buf);
+    memset(d, 0, sizeof *d);
+    return c4_nil();
+}
+
+C4Val c4_block_stats(C4Val h) {
+    C4BlockDev *d = c4_block_dev(h);
+    C4Val st = c4_dict();
+    dict_put(st.dict, "sectors", c4_num((double)d->sectors));
+    dict_put(st.dict, "reads", c4_num((double)d->reads));
+    dict_put(st.dict, "writes", c4_num((double)d->writes));
+    return st;
+}
+
 /* ======== emit parity additions (0.3.5): json, hex, random, crc32,
    collections, strings extras, time extras. All errors route through
    c4_err so try/catch catches them like the interpreter. ======== */

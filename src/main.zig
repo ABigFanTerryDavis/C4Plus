@@ -5,6 +5,8 @@ const emit = @import("emit");
 const gui = @import("gui");
 const proc = @import("proc");
 const sock = @import("sock");
+const memmod = @import("mem");
+const blockmod = @import("block");
 
 const ErrInfo = struct {
     file: ?[]const u8 = null,
@@ -652,6 +654,9 @@ fn replMain(io: Io, arena: std.mem.Allocator, envmap: ?*const std.process.Enviro
         sub.imported_strings = repl_strings;
         sub.imported_csv = repl_csv;
         sub.imported_socket = repl_socket;
+        sub.imported_mem = repl_mem;
+        sub.imported_block = repl_block;
+        sub.imported_task = repl_task;
         sub.imported_http = repl_http;
         sub.http_redirects = repl_http_redir;
         sub.imported_vga = repl_vga;
@@ -688,6 +693,9 @@ fn replMain(io: Io, arena: std.mem.Allocator, envmap: ?*const std.process.Enviro
         repl_strings = sub.imported_strings;
         repl_csv = sub.imported_csv;
         repl_socket = sub.imported_socket;
+        repl_mem = sub.imported_mem;
+        repl_block = sub.imported_block;
+        repl_task = sub.imported_task;
         repl_http = sub.imported_http;
         repl_http_redir = sub.http_redirects;
         repl_vga = sub.imported_vga;
@@ -709,6 +717,13 @@ var repl_random: bool = false;
 var repl_strings: bool = false;
 var repl_csv: bool = false;
 var repl_socket: bool = false;
+var repl_mem: bool = false;
+var repl_block: bool = false;
+var repl_task: bool = false;
+
+var task_table: [32]Parser.TaskEntry = [_]Parser.TaskEntry{.{}} ** 32;
+var chan_table: [16]Parser.ChanEntry = [_]Parser.ChanEntry{.{}} ** 16;
+var task_cur: i32 = -1;
 var repl_http: bool = false;
 var repl_http_redir: u16 = 3;
 var repl_vga: bool = false;
@@ -1407,6 +1422,8 @@ const ParseError = error{
     BreakSignal,
     ContinueSignal,
     ExitSignal,
+    TaskYield,
+    TaskExit,
     FailSignal,
     MathError,
     JsonError,
@@ -1443,6 +1460,9 @@ const Parser = struct {
     imported_strings: bool = false,
     imported_csv: bool = false,
     imported_socket: bool = false,
+    imported_mem: bool = false,
+    imported_block: bool = false,
+    imported_task: bool = false,
     imported_http: bool = false,
     imported_vga: bool = false,
     imported_vgatogui: bool = false,
@@ -1524,6 +1544,9 @@ const Parser = struct {
             .imported_strings = self.imported_strings,
             .imported_csv = self.imported_csv,
             .imported_socket = self.imported_socket,
+            .imported_mem = self.imported_mem,
+            .imported_block = self.imported_block,
+            .imported_task = self.imported_task,
             .imported_http = self.imported_http,
             .imported_vga = self.imported_vga,
             .imported_vgatogui = self.imported_vgatogui,
@@ -1578,6 +1601,9 @@ const Parser = struct {
             .imported_strings = self.imported_strings,
             .imported_csv = self.imported_csv,
             .imported_socket = self.imported_socket,
+            .imported_mem = self.imported_mem,
+            .imported_block = self.imported_block,
+            .imported_task = self.imported_task,
             .imported_http = self.imported_http,
             .imported_vga = self.imported_vga,
             .imported_vgatogui = self.imported_vgatogui,
@@ -1747,12 +1773,18 @@ const Parser = struct {
                     self.imported_csv = true;
                 } else if (std.mem.eql(u8, mod, "socket")) {
                     self.imported_socket = true;
+                } else if (std.mem.eql(u8, mod, "mem")) {
+                    self.imported_mem = true;
+                } else if (std.mem.eql(u8, mod, "block")) {
+                    self.imported_block = true;
+                } else if (std.mem.eql(u8, mod, "task")) {
+                    self.imported_task = true;
                 } else if (std.mem.eql(u8, mod, "vga")) {
                     self.imported_vga = true;
                 } else if (std.mem.eql(u8, mod, "vgatogui")) {
                     self.imported_vgatogui = true;
                 } else {
-                    if (!self.mute)                     std.debug.print("{s}:{d}: unknown module '{s}' (only 'os'/'physics'/'json'/'time'/'heap'/'cpu'/'hex'/'random'/'strings'/'gui'/'http'/'vga'/'vgatogui'/'csv'/'socket' or \"file.c4h\")\n", .{ self.file, self.line, mod });
+                    if (!self.mute)                     std.debug.print("{s}:{d}: unknown module '{s}' (only 'os'/'physics'/'json'/'time'/'heap'/'cpu'/'hex'/'random'/'strings'/'gui'/'http'/'vga'/'vgatogui'/'csv'/'socket'/'mem'/'block'/'task' or \"file.c4h\")\n", .{ self.file, self.line, mod });
                     return ParseError.UnknownKeyword;
                 }
             }
@@ -2516,6 +2548,9 @@ const Parser = struct {
             .imported_strings = self.imported_strings,
             .imported_csv = self.imported_csv,
             .imported_socket = self.imported_socket,
+            .imported_mem = self.imported_mem,
+            .imported_block = self.imported_block,
+            .imported_task = self.imported_task,
             .imported_http = self.imported_http,
             .imported_vga = self.imported_vga,
             .imported_vgatogui = self.imported_vgatogui,
@@ -2557,6 +2592,9 @@ const Parser = struct {
         if (sub.imported_strings) self.imported_strings = sub.imported_strings or self.imported_strings;
         if (sub.imported_csv) self.imported_csv = sub.imported_csv or self.imported_csv;
         if (sub.imported_socket) self.imported_socket = sub.imported_socket or self.imported_socket;
+        if (sub.imported_mem) self.imported_mem = sub.imported_mem or self.imported_mem;
+        if (sub.imported_block) self.imported_block = sub.imported_block or self.imported_block;
+        if (sub.imported_task) self.imported_task = sub.imported_task or self.imported_task;
         if (sub.imported_http) self.imported_http = sub.imported_http or self.imported_http;
         if (sub.imported_vga) self.imported_vga = sub.imported_vga or self.imported_vga;
         if (sub.imported_vgatogui) self.imported_vgatogui = sub.imported_vgatogui or self.imported_vgatogui;
@@ -2635,7 +2673,7 @@ const Parser = struct {
         self.mute = true;
         self.runBodyShared(try_body, try_line) catch |err| {
             self.mute = was_mute;
-            if (err == ParseError.ReturnSignal or err == ParseError.BreakSignal or err == ParseError.ContinueSignal or err == ParseError.ExitSignal) {
+            if (err == ParseError.ReturnSignal or err == ParseError.BreakSignal or err == ParseError.ContinueSignal or err == ParseError.ExitSignal or err == ParseError.TaskYield or err == ParseError.TaskExit) {
                 return err;
             }
             if (err == error.OutOfMemory) return err;
@@ -2688,6 +2726,9 @@ const Parser = struct {
             .imported_strings = self.imported_strings,
             .imported_csv = self.imported_csv,
             .imported_socket = self.imported_socket,
+            .imported_mem = self.imported_mem,
+            .imported_block = self.imported_block,
+            .imported_task = self.imported_task,
             .imported_http = self.imported_http,
             .imported_vga = self.imported_vga,
             .imported_vgatogui = self.imported_vgatogui,
@@ -2963,6 +3004,592 @@ const Parser = struct {
         return ParseError.FailSignal;
     }
 
+    fn memFail(self: *Parser, comptime op: []const u8, err: anyerror) anyerror {
+        var msg: []const u8 = "failed";
+        if (err == error.BadHandle) msg = "bad handle";
+        if (err == error.TooBig) msg = "too big (max 16M)";
+        if (err == error.OutOfMemory) msg = "out of memory";
+        if (err == error.OutOfBounds) msg = "out of bounds";
+        if (err == error.NotArena) msg = "needs arena";
+        if (err == error.NotPool) msg = "needs pool";
+        if (err == error.BadSlot) msg = "bad slot";
+        const m = std.fmt.allocPrint(self.alloc, "mem {s} {s}", .{ op, msg }) catch {
+            return ParseError.UnknownFunction;
+        };
+        if (self.err) |e| e.fail_msg = m;
+        return ParseError.FailSignal;
+    }
+
+    fn memHandle(v: Value) ?u32 {
+        if (v != .number) return null;
+        const n = v.number;
+        if (n != @trunc(n) or n < 1 or n > 32) return null;
+        return @intFromFloat(n);
+    }
+
+    fn memOffset(v: Value) ?usize {
+        if (v != .number) return null;
+        const n = v.number;
+        if (n != @trunc(n) or n < 0 or n > 64 * 1024 * 1024) return null;
+        return @intFromFloat(n);
+    }
+
+    fn memWidthVal(v: Value, width: usize) ?u32 {
+        if (v != .number) return null;
+        const n = v.number;
+        if (n != @trunc(n) or n < 0) return null;
+        const cap: f64 = switch (width) {
+            1 => 255,
+            2 => 65535,
+            else => 4294967295,
+        };
+        if (n > cap) return null;
+        return @intFromFloat(n);
+    }
+
+    fn callMemMethod(self: *Parser, method: []const u8, arg_vals: []const Value) anyerror!Value {
+        if (!self.imported_mem) {
+            if (!self.mute) std.debug.print("error on line {d}: 'mem' used without 'import mem'\n", .{self.line});
+            return ParseError.UnknownKeyword;
+        }
+        if (std.mem.eql(u8, method, "arena")) {
+            if (arg_vals.len != 1 or Parser.memOffset(arg_vals[0]) == null) return ParseError.TypeError;
+            const size = Parser.memOffset(arg_vals[0]).?;
+            if (self.dry) return Value{ .number = 1 };
+            const id = memmod.memArena(self.alloc, size) catch |err| {
+                return self.memFail("arena", err);
+            };
+            return Value{ .number = @floatFromInt(id) };
+        }
+        if (std.mem.eql(u8, method, "pool")) {
+            if (arg_vals.len != 2 or Parser.memOffset(arg_vals[0]) == null or Parser.memOffset(arg_vals[1]) == null) return ParseError.TypeError;
+            const objsz = Parser.memOffset(arg_vals[0]).?;
+            const count = Parser.memOffset(arg_vals[1]).?;
+            if (objsz == 0 or count == 0) return ParseError.TypeError;
+            if (self.dry) return Value{ .number = 1 };
+            const id = memmod.memPool(self.alloc, objsz, count) catch |err| {
+                return self.memFail("pool", err);
+            };
+            return Value{ .number = @floatFromInt(id) };
+        }
+        if (std.mem.eql(u8, method, "alloc")) {
+            if (arg_vals.len != 2 or Parser.memHandle(arg_vals[0]) == null or Parser.memOffset(arg_vals[1]) == null) return ParseError.TypeError;
+            const id = Parser.memHandle(arg_vals[0]).?;
+            const n = Parser.memOffset(arg_vals[1]).?;
+            if (n == 0) return ParseError.TypeError;
+            if (self.dry) return Value{ .number = 0 };
+            const off = memmod.memAlloc(id, n) catch |err| {
+                return self.memFail("alloc", err);
+            };
+            return Value{ .number = @floatFromInt(off) };
+        }
+        if (std.mem.eql(u8, method, "acquire")) {
+            if (arg_vals.len != 1 or Parser.memHandle(arg_vals[0]) == null) return ParseError.TypeError;
+            const id = Parser.memHandle(arg_vals[0]).?;
+            if (self.dry) return Value{ .number = 0 };
+            const idx = memmod.memAcquire(id) catch |err| {
+                return self.memFail("acquire", err);
+            };
+            return Value{ .number = @floatFromInt(idx) };
+        }
+        if (std.mem.eql(u8, method, "release")) {
+            if (arg_vals.len != 2 or Parser.memHandle(arg_vals[0]) == null or Parser.memOffset(arg_vals[1]) == null) return ParseError.TypeError;
+            const id = Parser.memHandle(arg_vals[0]).?;
+            const idx = Parser.memOffset(arg_vals[1]).?;
+            if (self.dry) return Value{ .number = 1 };
+            const ok = memmod.memRelease(id, idx) catch |err| {
+                return self.memFail("release", err);
+            };
+            return Value{ .number = if (ok) 1 else 0 };
+        }
+        if (std.mem.eql(u8, method, "read_u8") or std.mem.eql(u8, method, "read_u16") or std.mem.eql(u8, method, "read_u32")) {
+            if (arg_vals.len != 2 or Parser.memHandle(arg_vals[0]) == null or Parser.memOffset(arg_vals[1]) == null) return ParseError.TypeError;
+            const id = Parser.memHandle(arg_vals[0]).?;
+            const off = Parser.memOffset(arg_vals[1]).?;
+            const width: usize = if (method[6] == '8') 1 else if (method[6] == '1') 2 else 4;
+            if (self.dry) return Value{ .number = 0 };
+            const v = memmod.memRead(id, off, width) catch |err| {
+                return self.memFail("read", err);
+            };
+            return Value{ .number = @floatFromInt(v) };
+        }
+        if (std.mem.eql(u8, method, "write_u8") or std.mem.eql(u8, method, "write_u16") or std.mem.eql(u8, method, "write_u32")) {
+            if (arg_vals.len != 3 or Parser.memHandle(arg_vals[0]) == null or Parser.memOffset(arg_vals[1]) == null) return ParseError.TypeError;
+            const id = Parser.memHandle(arg_vals[0]).?;
+            const off = Parser.memOffset(arg_vals[1]).?;
+            const width: usize = if (method[7] == '8') 1 else if (method[7] == '1') 2 else 4;
+            const val = Parser.memWidthVal(arg_vals[2], width) orelse return ParseError.TypeError;
+            if (self.dry) return Value{ .nil = {} };
+            memmod.memWrite(id, off, width, val) catch |err| {
+                return self.memFail("write", err);
+            };
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, method, "fill")) {
+            if (arg_vals.len != 4 or Parser.memHandle(arg_vals[0]) == null or Parser.memOffset(arg_vals[1]) == null or Parser.memOffset(arg_vals[2]) == null) return ParseError.TypeError;
+            const id = Parser.memHandle(arg_vals[0]).?;
+            const off = Parser.memOffset(arg_vals[1]).?;
+            const n = Parser.memOffset(arg_vals[2]).?;
+            const byte = Parser.memWidthVal(arg_vals[3], 1) orelse return ParseError.TypeError;
+            if (self.dry) return Value{ .nil = {} };
+            memmod.memFill(id, off, n, @intCast(byte)) catch |err| {
+                return self.memFail("fill", err);
+            };
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, method, "copy")) {
+            if (arg_vals.len != 4 or Parser.memHandle(arg_vals[0]) == null or Parser.memOffset(arg_vals[1]) == null or Parser.memOffset(arg_vals[2]) == null or Parser.memOffset(arg_vals[3]) == null) return ParseError.TypeError;
+            const id = Parser.memHandle(arg_vals[0]).?;
+            const dst = Parser.memOffset(arg_vals[1]).?;
+            const src = Parser.memOffset(arg_vals[2]).?;
+            const n = Parser.memOffset(arg_vals[3]).?;
+            if (self.dry) return Value{ .nil = {} };
+            memmod.memCopy(id, dst, src, n) catch |err| {
+                return self.memFail("copy", err);
+            };
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, method, "usage")) {
+            if (arg_vals.len != 1 or Parser.memHandle(arg_vals[0]) == null) return ParseError.TypeError;
+            const id = Parser.memHandle(arg_vals[0]).?;
+            if (self.dry) return Value{ .number = 0 };
+            const u = memmod.memUsage(id) catch |err| {
+                return self.memFail("usage", err);
+            };
+            const st = try self.alloc.create(DictObj);
+            st.* = .{ .map = std.StringHashMap(Value).init(self.alloc) };
+            try st.map.put(try self.alloc.dupe(u8, "size"), Value{ .number = @floatFromInt(u.size) });
+            try st.map.put(try self.alloc.dupe(u8, "used"), Value{ .number = @floatFromInt(u.used) });
+            try st.map.put(try self.alloc.dupe(u8, "peak"), Value{ .number = @floatFromInt(u.peak) });
+            try st.map.put(try self.alloc.dupe(u8, "units"), Value{ .number = @floatFromInt(u.units) });
+            return Value{ .dict = st };
+        }
+        if (std.mem.eql(u8, method, "reset")) {
+            if (arg_vals.len != 1 or Parser.memHandle(arg_vals[0]) == null) return ParseError.TypeError;
+            const id = Parser.memHandle(arg_vals[0]).?;
+            if (self.dry) return Value{ .nil = {} };
+            memmod.memReset(id) catch |err| {
+                return self.memFail("reset", err);
+            };
+            return Value{ .nil = {} };
+        }
+        if (!self.mute) std.debug.print("error on line {d}: unknown mem.{s} (have arena/pool/alloc/acquire/release/read_u8/read_u16/read_u32/write_u8/write_u16/write_u32/fill/copy/usage/reset)\n", .{ self.line, method });
+        return ParseError.UnknownFunction;
+    }
+
+    fn blockFail(self: *Parser, comptime op: []const u8, err: anyerror) anyerror {
+        var msg: []const u8 = "failed";
+        if (err == error.BadHandle) msg = "bad handle";
+        if (err == error.TooBig) msg = "too big";
+        if (err == error.OutOfMemory) msg = "out of memory";
+        if (err == error.OutOfRange) msg = "out of range";
+        if (err == error.FileError) msg = "file failed";
+        const m = std.fmt.allocPrint(self.alloc, "block {s} {s}", .{ op, msg }) catch {
+            return ParseError.UnknownFunction;
+        };
+        if (self.err) |e| e.fail_msg = m;
+        return ParseError.FailSignal;
+    }
+
+    fn blockSectorsArg(v: Value) ?usize {
+        if (v != .number) return null;
+        const n = v.number;
+        if (n != @trunc(n) or n < 0 or n > 131072) return null;
+        return @intFromFloat(n);
+    }
+
+    fn callBlockMethod(self: *Parser, method: []const u8, arg_vals: []const Value) anyerror!Value {
+        if (!self.imported_block) {
+            if (!self.mute) std.debug.print("error on line {d}: 'block' used without 'import block'\n", .{self.line});
+            return ParseError.UnknownKeyword;
+        }
+        if (std.mem.eql(u8, method, "ramdisk")) {
+            if (arg_vals.len != 1 or Parser.blockSectorsArg(arg_vals[0]) == null) return ParseError.TypeError;
+            const sectors = Parser.blockSectorsArg(arg_vals[0]).?;
+            if (sectors == 0) return ParseError.TypeError;
+            if (self.dry) return Value{ .number = 1 };
+            const id = blockmod.blockRamdisk(self.alloc, sectors) catch |err| {
+                return self.blockFail("ramdisk", err);
+            };
+            return Value{ .number = @floatFromInt(id) };
+        }
+        if (std.mem.eql(u8, method, "file")) {
+            if (arg_vals.len != 2 or arg_vals[0] != .string or Parser.blockSectorsArg(arg_vals[1]) == null) return ParseError.TypeError;
+            const sectors = Parser.blockSectorsArg(arg_vals[1]).?;
+            if (self.dry) return Value{ .number = 1 };
+            const id = blockmod.blockFile(self.alloc, self.io, arg_vals[0].string, sectors) catch |err| {
+                return self.blockFail("file", err);
+            };
+            return Value{ .number = @floatFromInt(id) };
+        }
+        if (std.mem.eql(u8, method, "read")) {
+            if (arg_vals.len != 2 or Parser.memHandle(arg_vals[0]) == null or Parser.memOffset(arg_vals[1]) == null) return ParseError.TypeError;
+            const id = Parser.memHandle(arg_vals[0]).?;
+            const lba = Parser.memOffset(arg_vals[1]).?;
+            if (self.dry) {
+                const z = try self.alloc.create(ListObj);
+                z.* = .{ .items = .empty };
+                try z.items.appendNTimes(self.alloc, Value{ .number = 0 }, 512);
+                return Value{ .list = z };
+            }
+            const raw = blockmod.blockRead(self.alloc, self.io, id, lba) catch |err| {
+                return self.blockFail("read", err);
+            };
+            const out = try self.alloc.create(ListObj);
+            out.* = .{ .items = .empty };
+            for (raw) |b| try out.items.append(self.alloc, Value{ .number = @floatFromInt(b) });
+            return Value{ .list = out };
+        }
+        if (std.mem.eql(u8, method, "write")) {
+            if (arg_vals.len != 3 or Parser.memHandle(arg_vals[0]) == null or Parser.memOffset(arg_vals[1]) == null or arg_vals[2] != .list) return ParseError.TypeError;
+            const id = Parser.memHandle(arg_vals[0]).?;
+            const lba = Parser.memOffset(arg_vals[1]).?;
+            const items = arg_vals[2].list.items.items;
+            if (items.len != 512) return ParseError.TypeError;
+            var buf: [512]u8 = undefined;
+            for (items, 0..) |v, i| {
+                if (v != .number or v.number != @trunc(v.number) or v.number < 0 or v.number > 255) return ParseError.TypeError;
+                buf[i] = @intFromFloat(v.number);
+            }
+            if (self.dry) return Value{ .nil = {} };
+            blockmod.blockWrite(self.io, id, lba, &buf) catch |err| {
+                return self.blockFail("write", err);
+            };
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, method, "read_text")) {
+            if (arg_vals.len != 2 or Parser.memHandle(arg_vals[0]) == null or Parser.memOffset(arg_vals[1]) == null) return ParseError.TypeError;
+            const id = Parser.memHandle(arg_vals[0]).?;
+            const lba = Parser.memOffset(arg_vals[1]).?;
+            if (self.dry) return Value{ .string = try self.alloc.dupe(u8, "") };
+            const raw = blockmod.blockRead(self.alloc, self.io, id, lba) catch |err| {
+                return self.blockFail("read_text", err);
+            };
+            var end: usize = 0;
+            while (end < raw.len and raw[end] != 0) : (end += 1) {}
+            return Value{ .string = try self.alloc.dupe(u8, raw[0..end]) };
+        }
+        if (std.mem.eql(u8, method, "write_text")) {
+            if (arg_vals.len != 3 or Parser.memHandle(arg_vals[0]) == null or Parser.memOffset(arg_vals[1]) == null or arg_vals[2] != .string) return ParseError.TypeError;
+            const id = Parser.memHandle(arg_vals[0]).?;
+            const lba = Parser.memOffset(arg_vals[1]).?;
+            var text = arg_vals[2].string;
+            var cut: usize = 0;
+            while (cut < text.len and text[cut] != 0) : (cut += 1) {}
+            text = text[0..cut];
+            if (text.len > 512) return ParseError.TypeError;
+            if (self.dry) return Value{ .nil = {} };
+            var buf: [512]u8 = undefined;
+            @memset(&buf, 0);
+            @memcpy(buf[0..text.len], text);
+            blockmod.blockWrite(self.io, id, lba, &buf) catch |err| {
+                return self.blockFail("write_text", err);
+            };
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, method, "sectors")) {
+            if (arg_vals.len != 1 or Parser.memHandle(arg_vals[0]) == null) return ParseError.TypeError;
+            const id = Parser.memHandle(arg_vals[0]).?;
+            if (self.dry) return Value{ .number = 0 };
+            const n = blockmod.blockSectors(id) catch |err| {
+                return self.blockFail("sectors", err);
+            };
+            return Value{ .number = @floatFromInt(n) };
+        }
+        if (std.mem.eql(u8, method, "flush")) {
+            if (arg_vals.len != 1 or Parser.memHandle(arg_vals[0]) == null) return ParseError.TypeError;
+            const id = Parser.memHandle(arg_vals[0]).?;
+            if (self.dry) return Value{ .nil = {} };
+            blockmod.blockFlush(self.io, id) catch |err| {
+                return self.blockFail("flush", err);
+            };
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, method, "close")) {
+            if (arg_vals.len != 1 or Parser.memHandle(arg_vals[0]) == null) return ParseError.TypeError;
+            const id = Parser.memHandle(arg_vals[0]).?;
+            if (self.dry) return Value{ .nil = {} };
+            blockmod.blockClose(self.alloc, self.io, id) catch |err| {
+                return self.blockFail("close", err);
+            };
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, method, "copy")) {
+            if (arg_vals.len != 4 or Parser.memHandle(arg_vals[0]) == null or Parser.memOffset(arg_vals[1]) == null or Parser.memOffset(arg_vals[2]) == null or Parser.memOffset(arg_vals[3]) == null) return ParseError.TypeError;
+            const id = Parser.memHandle(arg_vals[0]).?;
+            const dst = Parser.memOffset(arg_vals[1]).?;
+            const src = Parser.memOffset(arg_vals[2]).?;
+            const n = Parser.memOffset(arg_vals[3]).?;
+            if (self.dry) return Value{ .nil = {} };
+            blockmod.blockCopy(self.io, id, dst, src, n) catch |err| {
+                return self.blockFail("copy", err);
+            };
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, method, "fill")) {
+            if (arg_vals.len != 4 or Parser.memHandle(arg_vals[0]) == null or Parser.memOffset(arg_vals[1]) == null or Parser.memOffset(arg_vals[2]) == null) return ParseError.TypeError;
+            const id = Parser.memHandle(arg_vals[0]).?;
+            const lba = Parser.memOffset(arg_vals[1]).?;
+            const n = Parser.memOffset(arg_vals[2]).?;
+            if (arg_vals[3] != .number or arg_vals[3].number != @trunc(arg_vals[3].number) or arg_vals[3].number < 0 or arg_vals[3].number > 255) return ParseError.TypeError;
+            const byte: u8 = @intFromFloat(arg_vals[3].number);
+            if (self.dry) return Value{ .nil = {} };
+            blockmod.blockFill(self.io, id, lba, n, byte) catch |err| {
+                return self.blockFail("fill", err);
+            };
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, method, "stats")) {
+            if (arg_vals.len != 1 or Parser.memHandle(arg_vals[0]) == null) return ParseError.TypeError;
+            const id = Parser.memHandle(arg_vals[0]).?;
+            if (self.dry) return Value{ .number = 0 };
+            const s = blockmod.blockStats(id) catch |err| {
+                return self.blockFail("stats", err);
+            };
+            const st = try self.alloc.create(DictObj);
+            st.* = .{ .map = std.StringHashMap(Value).init(self.alloc) };
+            try st.map.put(try self.alloc.dupe(u8, "sectors"), Value{ .number = @floatFromInt(s.sectors) });
+            try st.map.put(try self.alloc.dupe(u8, "reads"), Value{ .number = @floatFromInt(s.reads) });
+            try st.map.put(try self.alloc.dupe(u8, "writes"), Value{ .number = @floatFromInt(s.writes) });
+            return Value{ .dict = st };
+        }
+        if (!self.mute) std.debug.print("error on line {d}: unknown block.{s} (have ramdisk/file/read/write/read_text/write_text/sectors/flush/close/copy/fill/stats)\n", .{ self.line, method });
+        return ParseError.UnknownFunction;
+    }
+
+    fn taskFail(self: *Parser, comptime op: []const u8, err: anyerror) anyerror {
+        var msg: []const u8 = "failed";
+        if (err == error.BadHandle) msg = "bad handle";
+        if (err == error.OutOfMemory) msg = "out of memory";
+        if (err == error.UnknownFn) msg = "unknown fn";
+        if (err == error.HasArgs) msg = "needs zero-arg fn";
+        if (err == error.BadChannel) msg = "bad channel";
+        const m = std.fmt.allocPrint(self.alloc, "task {s} {s}", .{ op, msg }) catch {
+            return ParseError.UnknownFunction;
+        };
+        if (self.err) |e| e.fail_msg = m;
+        return ParseError.FailSignal;
+    }
+
+    fn taskId(v: Value) ?u32 {
+        if (v != .number) return null;
+        const n = v.number;
+        if (n != @trunc(n) or n < 1 or n > 32) return null;
+        return @intFromFloat(n);
+    }
+
+    fn taskChanId(v: Value) ?u32 {
+        if (v != .number) return null;
+        const n = v.number;
+        if (n != @trunc(n) or n < 1 or n > 16) return null;
+        return @intFromFloat(n);
+    }
+
+    const TaskEntry = struct {
+        used: bool = false,
+        alive: bool = false,
+        name: []u8 = &.{},
+        wake_ms: i64 = 0,
+    };
+
+    const ChanEntry = struct {
+        used: bool = false,
+        buf: std.ArrayList(Value) = .empty,
+    };
+
+    fn taskNowMs(io: Io) i64 {
+        return Io.Timestamp.now(io, .real).toMilliseconds();
+    }
+
+    fn taskStep(self: *Parser) anyerror!usize {
+        const now = taskNowMs(self.io);
+        var ran: usize = 0;
+        for (&task_table, 0..) |*t, i| {
+            if (!t.used or !t.alive) continue;
+            if (t.wake_ms > now) continue;
+            const target = self.funcs.get(t.name) orelse {
+                t.alive = false;
+                continue;
+            };
+            task_cur = @intCast(i + 1);
+            _ = self.invokeScoped(target, target.scope orelse self.scope, &.{}) catch |err| {
+                task_cur = -1;
+                if (err == ParseError.TaskYield) {
+                    ran += 1;
+                    continue;
+                }
+                t.alive = false;
+                if (err == ParseError.TaskExit) {
+                    ran += 1;
+                    continue;
+                }
+                return err;
+            };
+            task_cur = -1;
+            t.alive = false;
+            ran += 1;
+        }
+        task_cur = -1;
+        return ran;
+    }
+
+    fn taskRun(self: *Parser, cap: ?usize) anyerror!usize {
+        const saved_cur = task_cur;
+        var steps: usize = 0;
+        while (true) {
+            var any_alive = false;
+            for (task_table) |t| {
+                if (t.used and t.alive) {
+                    any_alive = true;
+                    break;
+                }
+            }
+            if (!any_alive) break;
+            if (cap) |c| if (steps >= c) break;
+            const ran = try self.taskStep();
+            steps += ran;
+            if (ran == 0) Io.sleep(self.io, Io.Duration.fromMilliseconds(1), .real) catch {};
+        }
+        task_cur = saved_cur;
+        return steps;
+    }
+
+    fn getTask(id: u32) ?*TaskEntry {
+        if (id == 0 or id > 32) return null;
+        const t = &task_table[id - 1];
+        if (!t.used) return null;
+        return t;
+    }
+
+    fn getChan(id: u32) ?*ChanEntry {
+        if (id == 0 or id > 16) return null;
+        const c = &chan_table[id - 1];
+        if (!c.used) return null;
+        return c;
+    }
+
+    fn callTaskMethod(self: *Parser, method: []const u8, arg_vals: []const Value) anyerror!Value {
+        if (!self.imported_task) {
+            if (!self.mute) std.debug.print("error on line {d}: 'task' used without 'import task'\n", .{self.line});
+            return ParseError.UnknownKeyword;
+        }
+        if (std.mem.eql(u8, method, "spawn")) {
+            if (arg_vals.len != 1 or arg_vals[0] != .string) return ParseError.TypeError;
+            if (self.dry) return Value{ .number = 1 };
+            const target = self.funcs.get(arg_vals[0].string) orelse {
+                return self.taskFail("spawn", error.UnknownFn);
+            };
+            if (target.params.len > 0) {
+                return self.taskFail("spawn", error.HasArgs);
+            }
+            for (&task_table, 0..) |*t, i| {
+                if (!t.used) {
+                    t.used = true;
+                    t.alive = true;
+                    t.name = try self.alloc.dupe(u8, arg_vals[0].string);
+                    t.wake_ms = 0;
+                    return Value{ .number = @floatFromInt(i + 1) };
+                }
+            }
+            return self.taskFail("spawn", error.OutOfMemory);
+        }
+        if (std.mem.eql(u8, method, "yield")) {
+            if (arg_vals.len != 0) return ParseError.TypeError;
+            if (self.dry) return Value{ .nil = {} };
+            if (task_cur < 0) return Value{ .nil = {} };
+            return ParseError.TaskYield;
+        }
+        if (std.mem.eql(u8, method, "exit")) {
+            if (arg_vals.len != 0) return ParseError.TypeError;
+            if (self.dry) return Value{ .nil = {} };
+            if (task_cur < 0) return ParseError.TypeError;
+            return ParseError.TaskExit;
+        }
+        if (std.mem.eql(u8, method, "self")) {
+            if (arg_vals.len != 0) return ParseError.TypeError;
+            if (self.dry) return Value{ .number = 1 };
+            return Value{ .number = @floatFromInt(task_cur) };
+        }
+        if (std.mem.eql(u8, method, "alive")) {
+            if (arg_vals.len != 1 or Parser.taskId(arg_vals[0]) == null) return ParseError.TypeError;
+            const id = Parser.taskId(arg_vals[0]).?;
+            if (self.dry) return Value{ .number = 1 };
+            const t = getTask(id) orelse return Value{ .number = 0 };
+            return Value{ .number = if (t.alive) 1 else 0 };
+        }
+        if (std.mem.eql(u8, method, "list")) {
+            if (arg_vals.len != 0) return ParseError.TypeError;
+            const out = try self.alloc.create(ListObj);
+            out.* = .{ .items = .empty };
+            if (!self.dry) {
+                for (task_table, 0..) |t, i| {
+                    if (t.used and t.alive) try out.items.append(self.alloc, Value{ .number = @floatFromInt(i + 1) });
+                }
+            }
+            return Value{ .list = out };
+        }
+        if (std.mem.eql(u8, method, "sleep")) {
+            if (arg_vals.len != 1 or arg_vals[0] != .number or !(arg_vals[0].number >= 0)) return ParseError.TypeError;
+            if (self.dry) return Value{ .nil = {} };
+            if (task_cur < 0) return ParseError.TypeError;
+            const t = getTask(@intCast(task_cur)) orelse return ParseError.TypeError;
+            t.wake_ms = taskNowMs(self.io) + @as(i64, @intFromFloat(arg_vals[0].number * 1000));
+            return ParseError.TaskYield;
+        }
+        if (std.mem.eql(u8, method, "chan")) {
+            if (arg_vals.len != 0) return ParseError.TypeError;
+            if (self.dry) return Value{ .number = 1 };
+            for (&chan_table, 0..) |*c, i| {
+                if (!c.used) {
+                    c.used = true;
+                    c.buf = .empty;
+                    return Value{ .number = @floatFromInt(i + 1) };
+                }
+            }
+            return self.taskFail("chan", error.OutOfMemory);
+        }
+        if (std.mem.eql(u8, method, "send")) {
+            if (arg_vals.len != 2 or Parser.taskChanId(arg_vals[0]) == null) return ParseError.TypeError;
+            const id = Parser.taskChanId(arg_vals[0]).?;
+            if (self.dry) return Value{ .nil = {} };
+            const c = getChan(id) orelse {
+                return self.taskFail("send", error.BadChannel);
+            };
+            try c.buf.append(self.alloc, arg_vals[1]);
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, method, "recv")) {
+            if (arg_vals.len != 1 or Parser.taskChanId(arg_vals[0]) == null) return ParseError.TypeError;
+            const id = Parser.taskChanId(arg_vals[0]).?;
+            if (self.dry) return Value{ .nil = {} };
+            const c = getChan(id) orelse {
+                return self.taskFail("recv", error.BadChannel);
+            };
+            if (c.buf.items.len == 0) return Value{ .nil = {} };
+            return c.buf.orderedRemove(0);
+        }
+        if (std.mem.eql(u8, method, "run")) {
+            if (arg_vals.len == 0) {
+                if (self.dry) return Value{ .nil = {} };
+                _ = try self.taskRun(null);
+                return Value{ .nil = {} };
+            }
+            if (arg_vals.len != 1 or arg_vals[0] != .number or arg_vals[0].number != @trunc(arg_vals[0].number) or arg_vals[0].number < 0) return ParseError.TypeError;
+            const cap: usize = @intFromFloat(arg_vals[0].number);
+            if (self.dry) return Value{ .number = 0 };
+            const steps = try self.taskRun(cap);
+            return Value{ .number = @floatFromInt(steps) };
+        }
+        if (std.mem.eql(u8, method, "step")) {
+            if (arg_vals.len != 0) return ParseError.TypeError;
+            if (self.dry) return Value{ .number = 0 };
+            const ran = try self.taskStep();
+            return Value{ .number = @floatFromInt(ran) };
+        }
+        if (!self.mute) std.debug.print("error on line {d}: unknown task.{s} (have spawn/yield/exit/self/alive/list/sleep/chan/send/recv/run/step)\n", .{ self.line, method });
+        return ParseError.UnknownFunction;
+    }
+
     fn callModuleMethod(self: *Parser, module: []const u8, method: []const u8, arg_vals: []const Value) anyerror!Value {
         if (std.mem.eql(u8, module, "physics")) {
             return try self.callPhysicsMethod(method, arg_vals);
@@ -2996,6 +3623,15 @@ const Parser = struct {
         }
         if (std.mem.eql(u8, module, "socket")) {
             return try self.callSocketMethod(method, arg_vals);
+        }
+        if (std.mem.eql(u8, module, "mem")) {
+            return try self.callMemMethod(method, arg_vals);
+        }
+        if (std.mem.eql(u8, module, "block")) {
+            return try self.callBlockMethod(method, arg_vals);
+        }
+        if (std.mem.eql(u8, module, "task")) {
+            return try self.callTaskMethod(method, arg_vals);
         }
         if (std.mem.eql(u8, module, "http")) {
             return try self.callHttpMethod(method, arg_vals);
@@ -6841,6 +7477,9 @@ const JsonParser = struct {
             .imported_strings = self.imported_strings,
             .imported_csv = self.imported_csv,
             .imported_socket = self.imported_socket,
+            .imported_mem = self.imported_mem,
+            .imported_block = self.imported_block,
+            .imported_task = self.imported_task,
             .imported_http = self.imported_http,
             .imported_vga = self.imported_vga,
             .imported_vgatogui = self.imported_vgatogui,

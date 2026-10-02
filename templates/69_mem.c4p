@@ -1,0 +1,39 @@
+# 69_mem — kernel-style allocators: arena bump + slab pools.
+#
+# The 0.4.0 kernel pool is one big arena: bump a pointer, never free
+# single blocks. Slab pools are the companion trick real kernels use
+# for fixed-size objects (task structs, FAT dentries): acquire a slot,
+# release it back, no fragmentation ever. This template runs both and
+# shows the stats a kernel would log at boot.
+#
+# Same calls compile to native too (c4_mem_* in rt/c4rt.c).
+
+import mem
+
+# arena: the boot pool. alloc bumps forward (4-aligned), reset rewinds.
+let boot = mem.arena(4096)
+let stacks = mem.alloc(boot, 1024)
+let fbs = mem.alloc(boot, 512)
+print ("stacks@" + str(stacks) + " fb@" + str(fbs))
+mem.fill(boot, stacks, 1024, 0)
+mem.write_u32(boot, stacks, 3735928559)
+print ("magic=" + str(mem.read_u32(boot, stacks)))
+print mem.usage(boot)
+
+# pool: 8 task slots of 32 bytes. acquire/release, double free is 0.
+let tasks = mem.pool(32, 8)
+let t0 = mem.acquire(tasks)
+let t1 = mem.acquire(tasks)
+mem.write_u16(tasks, t0 * 32, 100)
+mem.write_u16(tasks, t1 * 32, 200)
+print ("t0=" + str(t0) + " prio=" + str(mem.read_u16(tasks, t0 * 32)))
+print ("t1=" + str(t1) + " prio=" + str(mem.read_u16(tasks, t1 * 32)))
+let ok = mem.release(tasks, t0)
+print ("freed=" + str(ok))
+let again = mem.release(tasks, t0)
+print ("doublefree=" + str(again))
+print mem.usage(tasks)
+
+# out of bounds is catchable, exhaustion is data (-1), like heap.malloc.
+try { mem.write_u8(boot, 99999, 1) } catch e { print ("caught: " + e) }
+print ("full=" + str(mem.alloc(boot, 99999)))

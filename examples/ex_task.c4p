@@ -1,0 +1,47 @@
+# task basics: spawn/yield/exit, channels, step/run, catchable errors
+# NOTE: a task function restarts from the top on every step (protothread
+# style) — progress lives in globals, locals do not survive yield.
+import task
+
+let ch = task.chan()
+let log = []
+let pstep = 0
+
+fn producer() {
+  if pstep == 0 { task.send(ch, "a") }
+  if pstep == 1 { task.send(ch, "b") }
+  if pstep == 2 {
+    task.send(ch, "done")
+    task.exit()
+  }
+  pstep = pstep + 1
+  task.yield()
+}
+
+fn consumer() {
+  let got = task.recv(ch)
+  while got != nil {
+    push(log, got)
+    if len(log) == 3 {
+      task.exit()
+    }
+    got = task.recv(ch)
+  }
+  task.yield()
+}
+
+let p = task.spawn("producer")
+let c = task.spawn("consumer")
+print ("ids=" + str(p) + "," + str(c))
+print ("self-outside=" + str(task.self()))
+task.run()
+print log
+print ("alive=" + str(task.alive(p)) + str(task.alive(c)))
+print ("listlen=" + str(len(task.list())))
+let q = task.spawn("consumer")
+print ("capped=" + str(task.run(2)))
+try { task.spawn("nosuchfn") } catch e { print ("caught: " + e) }
+fn withargs(x) {
+  print x
+}
+try { task.spawn("withargs") } catch e { print ("caught2: " + e) }

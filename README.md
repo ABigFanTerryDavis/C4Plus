@@ -451,6 +451,21 @@ socket.close(c)
 socket.listen(8080)        # -> server handle (127.0.0.1 default)
 socket.accept(s)           # blocks until a client arrives -> handle
 # DNS/connect/refused/reset failures are catchable with try/catch
+
+import mem                 # arenas + pools (compiles to native too)
+let a = mem.arena(4096)
+mem.write_u32(a, mem.alloc(a, 64), 1234)
+mem.usage(a)               # -> {size, used, peak, units}
+
+import block               # 512B sectors (compiles to native too)
+let d = block.ramdisk(8)
+block.write_text(d, 0, "hi")
+block.read_text(d, 0)
+
+import task                # cooperative tasks, script-only
+task.spawn("worker")       # named zero-arg fn, run as steps
+task.yield()               # locals do not survive yield (protothreads)
+task.run()                 # until no task alive
 ```
 
 ---
@@ -736,6 +751,11 @@ into ring-3 tasks (`65_exec` — `flat()` flattens a file list for the ELF loade
 Script-side networking and data: a TCP echo server + chat client (`67_socket` →
 `68_chat` — `connect/listen/accept/send/recv/recv_line/close`, errors catchable)
 and CSV tables (`csv.parse/stringify` with quoting + custom separators, native-compiled).
+Then the systems trio: kernel-style allocators (`69_mem` — arenas + slab pools,
+typed access, native-compiled), a storage stack (`70_block` — ramdisk/file images,
+512-byte sectors, native-compiled), and cooperative tasks (`71_task` — named
+functions run as steps, channels, protothread-style, script-only since emitted
+functions cannot see globals).
 
 ### Kernel meter
 
@@ -749,12 +769,12 @@ filesystem, more drivers (serial disk DMA, sound, network), and a fuller shell.
 ## Repository layout
 
 ```
-src/            c4c/c4pp implementation (Zig): main.zig, emit.zig, gui.zig, proc.zig
+src/            c4c/c4pp implementation (Zig): main.zig, emit.zig, gui.zig, proc.zig, sock.zig, mem.zig, block.zig
 rt/             runtimes: c4rt.c/h (hosted), c4rt_fs.c/h (freestanding), irq.s, userblob.c
 boot/           stage-1 boot sector + linker scripts
 user/           ring-3 programs (hello.s, pong.s) + mkelf.py ELF wrapper
 examples/       small programs per feature (also used as tests)
-templates/      numbered walkthroughs 01_hello .. 68_chat (+ .c4asm sidecars)
+templates/      numbered walkthroughs 01_hello .. 71_task (+ .c4asm sidecars)
 build.zig       build definition (version lives here)
 build.zig.zon   package manifest (version mirrored here)
 DOCS.md         full language + kernel reference
@@ -764,7 +784,8 @@ zip/            local release snapshots (kept out of git; use GitHub releases)
 `templates/` is the guided tour: start at `01_hello.c4p` for the language, `43_gdt` →
 `44_kmain` → `52_timer` → `54_keyboard` → `55_paging` → `56_syscall` → `58_usermode` →
 `59_sched` → `61_ata` → `62_fat` → `63_vga` → `64_shell` → `65_exec` → `66_vga` for the
-kernel path, then `67_socket` → `68_chat` for TCP. Every kernel template header documents its exact build recipe.
+kernel path, then `67_socket` → `68_chat` for TCP and `69_mem` → `70_block` →
+`71_task` for the systems trio. Every kernel template header documents its exact build recipe.
 
 ---
 
@@ -790,9 +811,15 @@ stays out of git; public releases go through GitHub releases.
   VGA console, interactive shell, `run FILE` disk exec into ring-3 tasks,
   plus the display story (`vga_*` kernel builtins, `import vga` +
   `import vgatogui` emulator). Kernel meter 65% → 80%.
-- **0.4.1 (this):** `socket` (TCP client+server, `connect/listen/accept/send/
+- **0.4.1:** `socket` (TCP client+server, `connect/listen/accept/send/
   recv/recv_line/close`, catchable errors, templates `67_socket`+`68_chat`) and
   `csv` (`parse/stringify`, quoted fields, custom separators, native-compiled).
+- **0.4.2 (this):** the systems trio — `mem` (arena bump + slab pools, typed
+  byte access, `usage` stats, native-compiled, `69_mem`), `block` (ramdisk +
+  file images, 512-byte sectors as number lists, `stats` counters,
+  native-compiled, `70_block`), `task` (cooperative `spawn/yield/exit/sleep`,
+  `chan/send/recv` channels, `run/step` scheduler, protothread-style shared
+  state, script-only, `71_task`).
 - After that: writable filesystem, more drivers, fuller shell.
 
 ---
