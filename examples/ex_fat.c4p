@@ -1,0 +1,20 @@
+# fat basics: format, write/read text, ls, delete, catchable errors
+import fat
+import block
+let d = block.ramdisk(512)
+fat.format(d)
+print ("ls0=" + str(fat.ls(d)))
+fat.write_text(d, "hello.txt", "hello fat world")
+print ("ls1=" + str(fat.ls(d)))
+print ("t=" + fat.read_text(d, "hello.txt"))
+let raw = fat.read(d, "hello.txt")
+print ("len=" + str(len(raw)) + " b0=" + str(raw[0]))
+fat.write_text(d, "hello.txt", "overwrite!")
+print ("t2=" + fat.read_text(d, "hello.txt"))
+print ("del=" + str(fat.delete(d, "hello.txt")))
+print ("del2=" + str(fat.delete(d, "hello.txt")))
+print ("ls2=" + str(fat.ls(d)))
+try { fat.read_text(d, "gone.txt") } catch e { print ("caught: " + e) }
+try { fat.write_text(d, "badname toolong.txt", "x") } catch e { print ("caught2: " + e) }
+block.close(d)
+print "closed"

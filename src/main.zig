@@ -7,6 +7,7 @@ const proc = @import("proc");
 const sock = @import("sock");
 const memmod = @import("mem");
 const blockmod = @import("block");
+const fatmod = @import("fat");
 
 const ErrInfo = struct {
     file: ?[]const u8 = null,
@@ -60,7 +61,7 @@ fn cliMain(init: std.process.Init) !void {
         } else {
             path = args[1];
         }
-    } else if (args.len >= 3 and (std.mem.eql(u8, args[1], "run") or std.mem.eql(u8, args[1], "check") or std.mem.eql(u8, args[1], "trace"))) {
+    } else if (args.len >= 3 and (std.mem.eql(u8, args[1], "run") or std.mem.eql(u8, args[1], "check") or std.mem.eql(u8, args[1], "trace") or std.mem.eql(u8, args[1], "lex"))) {
         if (std.mem.eql(u8, args[1], "trace")) {
             trace = true;
             cmd = "run";
@@ -177,7 +178,7 @@ fn cliMain(init: std.process.Init) !void {
         return;
     }
     if (path == null) {
-        std.debug.print("{s} - C4Plus compiler v{s}\nusage:\n  {s} run <file.c4p> [args...] [-silent]\n  {s} check <file.c4p> [-silent]\n  {s} trace <file.c4p> [args...]\n  {s} fmt [--write] <file.c4p> [-silent]\n  {s} --emit-c <file.c4p> [-o out.c] [-silent]\n  {s} exec \"<code>\" [args...] [--ok \"msg\"] [-silent]\n  {s} new <name>\n  {s} build [project.c4proj] [--native]\n  {s} assoc [--remove]\n  {s} <file.c4p> [args...] [-silent]\n(-silent/-trace anywhere)\n", .{ tool.exe_name, tool.exe_version, tool.exe_name, tool.exe_name, tool.exe_name, tool.exe_name, tool.exe_name, tool.exe_name, tool.exe_name, tool.exe_name, tool.exe_name, tool.exe_name });
+        std.debug.print("{s} - C4Plus compiler v{s}\nusage:\n  {s} run <file.c4p> [args...] [-silent]\n  {s} check <file.c4p> [-silent]\n  {s} trace <file.c4p> [args...]\n  {s} lex <file.c4p>\n  {s} fmt [--write] <file.c4p> [-silent]\n  {s} --emit-c <file.c4p> [-o out.c] [-silent]\n  {s} exec \"<code>\" [args...] [--ok \"msg\"] [-silent]\n  {s} new <name>\n  {s} build [project.c4proj] [--native]\n  {s} assoc [--remove]\n  {s} <file.c4p> [args...] [-silent]\n(-silent/-trace anywhere)\n", .{ tool.exe_name, tool.exe_version, tool.exe_name, tool.exe_name, tool.exe_name, tool.exe_name, tool.exe_name, tool.exe_name, tool.exe_name, tool.exe_name, tool.exe_name, tool.exe_name, tool.exe_name });
         std.process.exit(1);
     }
     const dry = std.mem.eql(u8, cmd, "check");
@@ -187,7 +188,7 @@ fn cliMain(init: std.process.Init) !void {
             std.debug.print("error: fmt expects .c4p/.c4h/.c4asm/.c4bht file, got '{s}'\n", .{path.?});
             std.process.exit(1);
         }
-    } else if (!std.mem.eql(u8, cmd, "exec") and !std.mem.endsWith(u8, path.?, ".c4p") and !std.mem.endsWith(u8, path.?, ".c4bht")) {
+    } else if (!std.mem.eql(u8, cmd, "exec") and !std.mem.eql(u8, cmd, "lex") and !std.mem.endsWith(u8, path.?, ".c4p") and !std.mem.endsWith(u8, path.?, ".c4bht")) {
         std.debug.print("error: expected .c4p file, got '{s}'\n", .{path.?});
         std.process.exit(1);
     }
@@ -258,6 +259,18 @@ fn cliMain(init: std.process.Init) !void {
             stdout_fw.interface.writeAll(out) catch {};
             stdout_fw.interface.flush() catch {};
         }
+        return;
+    }
+
+    if (std.mem.eql(u8, cmd, "lex")) {
+        const out = lexDump(arena, source) catch {
+            std.debug.print("error: lex failed (out of memory)\n", .{});
+            std.process.exit(1);
+        };
+        var stdout_buf: [4096]u8 = undefined;
+        var stdout_fw: Io.File.Writer = .init(.stdout(), io, &stdout_buf);
+        stdout_fw.interface.writeAll(out) catch {};
+        stdout_fw.interface.flush() catch {};
         return;
     }
 
@@ -657,6 +670,7 @@ fn replMain(io: Io, arena: std.mem.Allocator, envmap: ?*const std.process.Enviro
         sub.imported_mem = repl_mem;
         sub.imported_block = repl_block;
         sub.imported_task = repl_task;
+        sub.imported_fat = repl_fat;
         sub.imported_http = repl_http;
         sub.http_redirects = repl_http_redir;
         sub.imported_vga = repl_vga;
@@ -696,6 +710,7 @@ fn replMain(io: Io, arena: std.mem.Allocator, envmap: ?*const std.process.Enviro
         repl_mem = sub.imported_mem;
         repl_block = sub.imported_block;
         repl_task = sub.imported_task;
+        repl_fat = sub.imported_fat;
         repl_http = sub.imported_http;
         repl_http_redir = sub.http_redirects;
         repl_vga = sub.imported_vga;
@@ -720,6 +735,7 @@ var repl_socket: bool = false;
 var repl_mem: bool = false;
 var repl_block: bool = false;
 var repl_task: bool = false;
+var repl_fat: bool = false;
 
 var task_table: [32]Parser.TaskEntry = [_]Parser.TaskEntry{.{}} ** 32;
 var chan_table: [16]Parser.ChanEntry = [_]Parser.ChanEntry{.{}} ** 16;
@@ -1437,6 +1453,177 @@ const ParseError = error{
     WriteFailed,
 };
 
+fn lexIsKeyword(w: []const u8) bool {
+    const kws = [_][]const u8{ "let", "print", "pt", "fn", "struct", "if", "elif", "else", "while", "for", "in", "switch", "try", "catch", "return", "break", "continue", "import", "and", "or", "not" };
+    for (kws) |k| {
+        if (std.mem.eql(u8, w, k)) return true;
+    }
+    return false;
+}
+
+// c4c lex oracle: one `kind:text:line` row per token. kind/text/line only;
+// split rows on the FIRST and LAST colon. Mirrors the interpreter's own
+// scan rules (parseIdent/parseNumber/parseStringAlloc/eatComment) plus a
+// one-token operand lookbehind for unary minus.
+fn lexDump(alloc: std.mem.Allocator, src: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    var pos: usize = 0;
+    var line: usize = 1;
+    var want_operand = true;
+    const emitTok = struct {
+        fn f(o: *std.ArrayList(u8), a: std.mem.Allocator, kind: []const u8, text: []const u8, ln: usize) !void {
+            try o.appendSlice(a, kind);
+            try o.append(a, ':');
+            try o.appendSlice(a, text);
+            const nb = try std.fmt.allocPrint(a, ":{d}\n", .{ln});
+            try o.appendSlice(a, nb);
+        }
+    }.f;
+    const emitStr = struct {
+        fn f(o: *std.ArrayList(u8), a: std.mem.Allocator, raw: []const u8, ln: usize) !void {
+            try o.appendSlice(a, "string:");
+            for (raw) |ch| {
+                if (ch == '\\') try o.appendSlice(a, "\\\\");
+                if (ch == '\n') try o.appendSlice(a, "\\n");
+                if (ch == '\t') try o.appendSlice(a, "\\t");
+                if (ch == '\r') try o.appendSlice(a, "\\r");
+                if (ch != '\\' and ch != '\n' and ch != '\t' and ch != '\r') try o.append(a, ch);
+            }
+            const nb = try std.fmt.allocPrint(a, ":{d}\n", .{ln});
+            try o.appendSlice(a, nb);
+        }
+    }.f;
+    while (pos < src.len) {
+        const c = src[pos];
+        if (c == ' ' or c == '\t' or c == '\r') {
+            pos += 1;
+            continue;
+        }
+        if (c == '\n') {
+            try emitTok(&out, alloc, "nl", "", line);
+            line += 1;
+            pos += 1;
+            want_operand = true;
+            continue;
+        }
+        if (c == '#' or (c == '/' and pos + 1 < src.len and src[pos + 1] == '/')) {
+            const start = pos;
+            while (pos < src.len and src[pos] != '\n') : (pos += 1) {}
+            try emitTok(&out, alloc, "comment", src[start..pos], line);
+            continue;
+        }
+        if (std.ascii.isAlphabetic(c) or c == '_') {
+            const start = pos;
+            while (pos < src.len and (std.ascii.isAlphanumeric(src[pos]) or src[pos] == '_')) : (pos += 1) {}
+            const w = src[start..pos];
+            try emitTok(&out, alloc, if (lexIsKeyword(w)) "keyword" else "ident", w, line);
+            want_operand = lexIsKeyword(w);
+            continue;
+        }
+        const next_is_digit = pos + 1 < src.len and std.ascii.isDigit(src[pos + 1]);
+        const nextnext_is_digit = pos + 2 < src.len and std.ascii.isDigit(src[pos + 2]);
+        if (c == '-' and want_operand and (next_is_digit or (pos + 1 < src.len and src[pos + 1] == '.' and nextnext_is_digit))) {
+            const start = pos;
+            pos += 1;
+            while (pos < src.len and std.ascii.isDigit(src[pos])) : (pos += 1) {}
+            if (pos < src.len and src[pos] == '.' and pos + 1 < src.len and std.ascii.isDigit(src[pos + 1])) {
+                pos += 1;
+                while (pos < src.len and std.ascii.isDigit(src[pos])) : (pos += 1) {}
+            }
+            try emitTok(&out, alloc, "number", src[start..pos], line);
+            want_operand = false;
+            continue;
+        }
+        if (std.ascii.isDigit(c) or (c == '.' and next_is_digit)) {
+            const start = pos;
+            while (pos < src.len and std.ascii.isDigit(src[pos])) : (pos += 1) {}
+            if (c != '.' and pos < src.len and src[pos] == '.' and pos + 1 < src.len and std.ascii.isDigit(src[pos + 1])) {
+                pos += 1;
+                while (pos < src.len and std.ascii.isDigit(src[pos])) : (pos += 1) {}
+            }
+            try emitTok(&out, alloc, "number", src[start..pos], line);
+            want_operand = false;
+            continue;
+        }
+        if (c == '"' or c == '\'') {
+            const quote = c;
+            const tline = line;
+            pos += 1;
+            var buf: std.ArrayList(u8) = .empty;
+            var closed = false;
+            while (pos < src.len) {
+                const d = src[pos];
+                if (d == '\n') break;
+                if (d == quote) {
+                    closed = true;
+                    pos += 1;
+                    break;
+                }
+                if (d == '\\' and pos + 1 < src.len) {
+                    const e = src[pos + 1];
+                    try buf.append(alloc, switch (e) {
+                        'n' => '\n',
+                        't' => '\t',
+                        'r' => '\r',
+                        '"' => '"',
+                        '\'' => '\'',
+                        '\\' => '\\',
+                        else => e,
+                    });
+                    pos += 2;
+                    continue;
+                }
+                try buf.append(alloc, d);
+                pos += 1;
+            }
+            if (!closed) {
+                try emitTok(&out, alloc, "error", "UnterminatedString", tline);
+                return try out.toOwnedSlice(alloc);
+            }
+            try emitStr(&out, alloc, buf.items, tline);
+            want_operand = false;
+            continue;
+        }
+        if (c == '.' and pos + 1 < src.len and src[pos + 1] == '.') {
+            try emitTok(&out, alloc, "op", "..", line);
+            pos += 2;
+            want_operand = true;
+            continue;
+        }
+        const two = [_][]const u8{ "==", "!=", "<=", ">=", "<<", ">>" };
+        var matched = false;
+        if (pos + 1 < src.len) {
+            for (two) |t| {
+                if (src[pos] == t[0] and src[pos + 1] == t[1]) {
+                    try emitTok(&out, alloc, "op", t, line);
+                    pos += 2;
+                    want_operand = true;
+                    matched = true;
+                    break;
+                }
+            }
+            if (matched) continue;
+        }
+        const single = "+-*/%&|^~<>=!()[]{}.,:;";
+        var is_single = false;
+        for (single) |s| {
+            if (c == s) {
+                is_single = true;
+                break;
+            }
+        }
+        if (is_single) {
+            try emitTok(&out, alloc, "op", src[pos .. pos + 1], line);
+            pos += 1;
+            want_operand = !(c == ')' or c == ']' or c == '}');
+            continue;
+        }
+        try emitTok(&out, alloc, "error", "BadChar", line);
+        return try out.toOwnedSlice(alloc);
+    }
+    return try out.toOwnedSlice(alloc);
+}
+
 const Parser = struct {
     src: []const u8,
     pos: usize = 0,
@@ -1463,6 +1650,7 @@ const Parser = struct {
     imported_mem: bool = false,
     imported_block: bool = false,
     imported_task: bool = false,
+    imported_fat: bool = false,
     imported_http: bool = false,
     imported_vga: bool = false,
     imported_vgatogui: bool = false,
@@ -1547,6 +1735,7 @@ const Parser = struct {
             .imported_mem = self.imported_mem,
             .imported_block = self.imported_block,
             .imported_task = self.imported_task,
+            .imported_fat = self.imported_fat,
             .imported_http = self.imported_http,
             .imported_vga = self.imported_vga,
             .imported_vgatogui = self.imported_vgatogui,
@@ -1604,6 +1793,7 @@ const Parser = struct {
             .imported_mem = self.imported_mem,
             .imported_block = self.imported_block,
             .imported_task = self.imported_task,
+            .imported_fat = self.imported_fat,
             .imported_http = self.imported_http,
             .imported_vga = self.imported_vga,
             .imported_vgatogui = self.imported_vgatogui,
@@ -1779,12 +1969,14 @@ const Parser = struct {
                     self.imported_block = true;
                 } else if (std.mem.eql(u8, mod, "task")) {
                     self.imported_task = true;
+                } else if (std.mem.eql(u8, mod, "fat")) {
+                    self.imported_fat = true;
                 } else if (std.mem.eql(u8, mod, "vga")) {
                     self.imported_vga = true;
                 } else if (std.mem.eql(u8, mod, "vgatogui")) {
                     self.imported_vgatogui = true;
                 } else {
-                    if (!self.mute)                     std.debug.print("{s}:{d}: unknown module '{s}' (only 'os'/'physics'/'json'/'time'/'heap'/'cpu'/'hex'/'random'/'strings'/'gui'/'http'/'vga'/'vgatogui'/'csv'/'socket'/'mem'/'block'/'task' or \"file.c4h\")\n", .{ self.file, self.line, mod });
+                    if (!self.mute)                     std.debug.print("{s}:{d}: unknown module '{s}' (only 'os'/'physics'/'json'/'time'/'heap'/'cpu'/'hex'/'random'/'strings'/'gui'/'http'/'vga'/'vgatogui'/'csv'/'socket'/'mem'/'block'/'task'/'fat' or \"file.c4h\")\n", .{ self.file, self.line, mod });
                     return ParseError.UnknownKeyword;
                 }
             }
@@ -2551,6 +2743,7 @@ const Parser = struct {
             .imported_mem = self.imported_mem,
             .imported_block = self.imported_block,
             .imported_task = self.imported_task,
+            .imported_fat = self.imported_fat,
             .imported_http = self.imported_http,
             .imported_vga = self.imported_vga,
             .imported_vgatogui = self.imported_vgatogui,
@@ -2595,6 +2788,7 @@ const Parser = struct {
         if (sub.imported_mem) self.imported_mem = sub.imported_mem or self.imported_mem;
         if (sub.imported_block) self.imported_block = sub.imported_block or self.imported_block;
         if (sub.imported_task) self.imported_task = sub.imported_task or self.imported_task;
+        if (sub.imported_fat) self.imported_fat = sub.imported_fat or self.imported_fat;
         if (sub.imported_http) self.imported_http = sub.imported_http or self.imported_http;
         if (sub.imported_vga) self.imported_vga = sub.imported_vga or self.imported_vga;
         if (sub.imported_vgatogui) self.imported_vgatogui = sub.imported_vgatogui or self.imported_vgatogui;
@@ -2729,6 +2923,7 @@ const Parser = struct {
             .imported_mem = self.imported_mem,
             .imported_block = self.imported_block,
             .imported_task = self.imported_task,
+            .imported_fat = self.imported_fat,
             .imported_http = self.imported_http,
             .imported_vga = self.imported_vga,
             .imported_vgatogui = self.imported_vgatogui,
@@ -3590,6 +3785,154 @@ const Parser = struct {
         return ParseError.UnknownFunction;
     }
 
+    fn fatFail(self: *Parser, comptime op: []const u8, err: anyerror) anyerror {
+        var msg: []const u8 = "failed";
+        if (err == error.BadHandle) msg = "bad handle";
+        if (err == error.BadFS) msg = "bad filesystem";
+        if (err == error.NotFound) msg = "not found";
+        if (err == error.NoSpace) msg = "no space";
+        if (err == error.DirFull) msg = "dir full";
+        if (err == error.Io) msg = "io failed";
+        if (err == error.OutOfMemory) msg = "out of memory";
+        const m = std.fmt.allocPrint(self.alloc, "fat {s} {s}", .{ op, msg }) catch {
+            return ParseError.UnknownFunction;
+        };
+        if (self.err) |e| e.fail_msg = m;
+        return ParseError.FailSignal;
+    }
+
+    fn fatName83(s: []const u8) ?[11]u8 {
+        if (s.len == 0 or s.len > 12) return null;
+        var dot: ?usize = null;
+        for (s, 0..) |ch, i| {
+            if (ch == '.') {
+                if (dot != null) return null;
+                dot = i;
+            }
+        }
+        const ni = dot orelse s.len;
+        const ei = if (dot) |d| d + 1 else s.len;
+        if (ni == 0 or ni > 8) return null;
+        if (s.len - ei > 3) return null;
+        var out: [11]u8 = [_]u8{' '} ** 11;
+        for (s[0..ni], 0..) |ch, i| out[i] = std.ascii.toUpper(ch);
+        for (s[ei..], 0..) |ch, i| out[8 + i] = std.ascii.toUpper(ch);
+        return out;
+    }
+
+    fn callFatMethod(self: *Parser, method: []const u8, arg_vals: []const Value) anyerror!Value {
+        if (!self.imported_fat) {
+            if (!self.mute) std.debug.print("error on line {d}: 'fat' used without 'import fat'\n", .{self.line});
+            return ParseError.UnknownKeyword;
+        }
+        if (std.mem.eql(u8, method, "format")) {
+            if (arg_vals.len != 1 or Parser.memHandle(arg_vals[0]) == null) return ParseError.TypeError;
+            const bid = Parser.memHandle(arg_vals[0]).?;
+            if (self.dry) return Value{ .nil = {} };
+            fatmod.fatFormat(self.alloc, self.io, bid) catch |err| {
+                return self.fatFail("format", err);
+            };
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, method, "ls")) {
+            if (arg_vals.len != 1 or Parser.memHandle(arg_vals[0]) == null) return ParseError.TypeError;
+            const bid = Parser.memHandle(arg_vals[0]).?;
+            const out = try self.alloc.create(ListObj);
+            out.* = .{ .items = .empty };
+            if (!self.dry) {
+                var names: std.ArrayList([11]u8) = .empty;
+                fatmod.fatLs(self.alloc, self.io, bid, &names) catch |err| {
+                    return self.fatFail("ls", err);
+                };
+                for (names.items) |nm| {
+                    var ni: usize = 8;
+                    while (ni > 0 and nm[ni - 1] == ' ') : (ni -= 1) {}
+                    var ei: usize = 3;
+                    while (ei > 0 and nm[8 + ei - 1] == ' ') : (ei -= 1) {}
+                    var buf: [12]u8 = undefined;
+                    @memcpy(buf[0..ni], nm[0..ni]);
+                    var ln = ni;
+                    if (ei > 0) {
+                        buf[ln] = '.';
+                        ln += 1;
+                        @memcpy(buf[ln .. ln + ei], nm[8 .. 8 + ei]);
+                        ln += ei;
+                    }
+                    try out.items.append(self.alloc, Value{ .string = try self.alloc.dupe(u8, buf[0..ln]) });
+                }
+            }
+            return Value{ .list = out };
+        }
+        if (std.mem.eql(u8, method, "read")) {
+            if (arg_vals.len != 2 or Parser.memHandle(arg_vals[0]) == null or arg_vals[1] != .string) return ParseError.TypeError;
+            const bid = Parser.memHandle(arg_vals[0]).?;
+            const nm = Parser.fatName83(arg_vals[1].string) orelse return ParseError.TypeError;
+            const out = try self.alloc.create(ListObj);
+            out.* = .{ .items = .empty };
+            if (!self.dry) {
+                const raw = fatmod.fatRead(self.alloc, self.io, bid, nm) catch |err| {
+                    return self.fatFail("read", err);
+                };
+                for (raw) |b| try out.items.append(self.alloc, Value{ .number = @floatFromInt(b) });
+            }
+            return Value{ .list = out };
+        }
+        if (std.mem.eql(u8, method, "read_text")) {
+            if (arg_vals.len != 2 or Parser.memHandle(arg_vals[0]) == null or arg_vals[1] != .string) return ParseError.TypeError;
+            const bid = Parser.memHandle(arg_vals[0]).?;
+            const nm = Parser.fatName83(arg_vals[1].string) orelse return ParseError.TypeError;
+            if (self.dry) return Value{ .string = try self.alloc.dupe(u8, "") };
+            const raw = fatmod.fatRead(self.alloc, self.io, bid, nm) catch |err| {
+                return self.fatFail("read_text", err);
+            };
+            var end: usize = 0;
+            while (end < raw.len and raw[end] != 0) : (end += 1) {}
+            return Value{ .string = try self.alloc.dupe(u8, raw[0..end]) };
+        }
+        if (std.mem.eql(u8, method, "write")) {
+            if (arg_vals.len != 3 or Parser.memHandle(arg_vals[0]) == null or arg_vals[1] != .string or arg_vals[2] != .list) return ParseError.TypeError;
+            const bid = Parser.memHandle(arg_vals[0]).?;
+            const nm = Parser.fatName83(arg_vals[1].string) orelse return ParseError.TypeError;
+            const items = arg_vals[2].list.items.items;
+            const buf = try self.alloc.alloc(u8, items.len);
+            for (items, 0..) |v, i| {
+                if (v != .number or v.number != @trunc(v.number) or v.number < 0 or v.number > 255) return ParseError.TypeError;
+                buf[i] = @intFromFloat(v.number);
+            }
+            if (self.dry) return Value{ .nil = {} };
+            fatmod.fatWrite(self.alloc, self.io, bid, nm, buf) catch |err| {
+                return self.fatFail("write", err);
+            };
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, method, "write_text")) {
+            if (arg_vals.len != 3 or Parser.memHandle(arg_vals[0]) == null or arg_vals[1] != .string or arg_vals[2] != .string) return ParseError.TypeError;
+            const bid = Parser.memHandle(arg_vals[0]).?;
+            const nm = Parser.fatName83(arg_vals[1].string) orelse return ParseError.TypeError;
+            var text = arg_vals[2].string;
+            var cut: usize = 0;
+            while (cut < text.len and text[cut] != 0) : (cut += 1) {}
+            text = text[0..cut];
+            if (self.dry) return Value{ .nil = {} };
+            fatmod.fatWrite(self.alloc, self.io, bid, nm, text) catch |err| {
+                return self.fatFail("write_text", err);
+            };
+            return Value{ .nil = {} };
+        }
+        if (std.mem.eql(u8, method, "delete")) {
+            if (arg_vals.len != 2 or Parser.memHandle(arg_vals[0]) == null or arg_vals[1] != .string) return ParseError.TypeError;
+            const bid = Parser.memHandle(arg_vals[0]).?;
+            const nm = Parser.fatName83(arg_vals[1].string) orelse return ParseError.TypeError;
+            if (self.dry) return Value{ .number = 1 };
+            const ok = fatmod.fatDelete(self.alloc, self.io, bid, nm) catch |err| {
+                return self.fatFail("delete", err);
+            };
+            return Value{ .number = if (ok) 1 else 0 };
+        }
+        if (!self.mute) std.debug.print("error on line {d}: unknown fat.{s} (have format/ls/read/read_text/write/write_text/delete)\n", .{ self.line, method });
+        return ParseError.UnknownFunction;
+    }
+
     fn callModuleMethod(self: *Parser, module: []const u8, method: []const u8, arg_vals: []const Value) anyerror!Value {
         if (std.mem.eql(u8, module, "physics")) {
             return try self.callPhysicsMethod(method, arg_vals);
@@ -3632,6 +3975,9 @@ const Parser = struct {
         }
         if (std.mem.eql(u8, module, "task")) {
             return try self.callTaskMethod(method, arg_vals);
+        }
+        if (std.mem.eql(u8, module, "fat")) {
+            return try self.callFatMethod(method, arg_vals);
         }
         if (std.mem.eql(u8, module, "http")) {
             return try self.callHttpMethod(method, arg_vals);
@@ -7400,6 +7746,9 @@ const JsonParser = struct {
         }
         if (std.mem.eql(u8, name, "outb") or std.mem.eql(u8, name, "inb") or
             std.mem.eql(u8, name, "inw") or
+            std.mem.eql(u8, name, "serial_init") or std.mem.eql(u8, name, "serial_putc") or
+            std.mem.eql(u8, name, "serial_puts") or std.mem.eql(u8, name, "serial_poll") or
+            std.mem.eql(u8, name, "serial_getc") or
             std.mem.eql(u8, name, "sti") or std.mem.eql(u8, name, "cli") or
             std.mem.eql(u8, name, "ticks") or std.mem.eql(u8, name, "irq_addr") or
             std.mem.eql(u8, name, "idt_set") or std.mem.eql(u8, name, "idt_load") or
@@ -7480,6 +7829,7 @@ const JsonParser = struct {
             .imported_mem = self.imported_mem,
             .imported_block = self.imported_block,
             .imported_task = self.imported_task,
+            .imported_fat = self.imported_fat,
             .imported_http = self.imported_http,
             .imported_vga = self.imported_vga,
             .imported_vgatogui = self.imported_vgatogui,

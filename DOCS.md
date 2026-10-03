@@ -1,4 +1,4 @@
-# C4Plus — Complete Docs (v0.4.2)
+# C4Plus — Complete Docs (v0.4.3)
 
 C4Plus (`.c4p`) is a small scripting language with headers (`.c4h`),
 assembly sidecars (`.c4asm`), batch files (`.c4bht`), projects
@@ -24,6 +24,8 @@ c4c <file.c4p> [args...] [-silent]      run a program
 c4c run <file.c4p> [args...] [-silent]  same, explicit
 c4c check <file.c4p> [-silent]          validate only (prints path: OK)
 c4c trace <file.c4p> [args...]          run + print every statement/call
+c4c lex <file.c4p>                    dump `kind:text:line` tokens
+                                      (oracle for templates/73_lex.c4p)
 c4c fmt [--write] <file> [-silent]      format .c4p/.c4h/.c4asm
 c4c --emit-c <file.c4p> [-o out.c] [--freestanding] [-silent]
                                         transpile to C99
@@ -384,6 +386,17 @@ task.step()                # one round over live tasks -> steps run
 task.self()                # current id, -1 outside; alive(id), list()
 # protothread style: locals do not survive yield, keep state in globals.
 # no mutexes needed: a step never preempts another step.
+
+import fat                 # writable FAT12 on block devices (native too)
+let v = block.ramdisk(512)
+fat.format(v)              # mkfat.py-compatible layout (512 sectors)
+fat.write_text(v, "hi.txt", "hello")
+fat.read_text(v, "hi.txt") # text stops at first zero byte
+fat.read(v, "hi.txt")      # -> list of byte-numbers (binary-safe)
+fat.write(v, "hi.txt", fat.read(v, "hi.txt"))
+fat.ls(v)                  # -> ["HI.TXT"] (root dir only, 8.3 uppercased)
+fat.delete(v, "hi.txt")    # -> 1 (0 when missing)
+# missing file / no space / bad fs are catchable with try/catch
 ```
 
 ## 7. Assembly side by side (`.c4asm`)
@@ -631,7 +644,15 @@ cannot see globals). Memory allocators (`69_mem`, `examples/ex_mem.c4p`:
 `fill/copy/usage/reset`, compiles to native). Block storage (`70_block`,
 `examples/ex_block.c4p`: `ramdisk/file/read/write/read_text/write_text/
 sectors/flush/close/copy/fill/stats` over 512-byte sectors as number
-lists, compiles to native).
+lists, compiles to native). Writable FAT12 on top of block devices
+(`72_fat`, `examples/ex_fat.c4p`: `format/ls/read/read_text/write/
+write_text/delete`, same layout `user/mkfat.py` builds so volumes are
+interchangeable, root dir only, timestamps zeroed, names 8.3 uppercased,
+compiles to native). Self-hosted shadow lexer (`73_lex`, verified
+token-identical to `c4c lex` over the whole corpus by `zig-out/lexdiff.py`:
+`keyword/ident/number/string/op/comment/nl/error` rows, unary-minus
+lookbehind, `..` maximal munch). COM1 serial log for kernels
+(`74_serial`, verified live under QEMU `-serial stdio`).
 
 Freestanding extras for kernel code (`--emit-c --freestanding`
 only — clean errors elsewhere): `outb(port, val)`, `inb(port)`, `inw(port)` (16-bit),
@@ -639,6 +660,9 @@ only — clean errors elsewhere): `outb(port, val)`, `inb(port)`, `inw(port)` (1
 `key()` (PS/2 scancode driver: next char code, or -1 if empty),
 `irq_addr()` / `irq1_addr()` (addresses of the IRQ stubs in
 `rt/irq.s`), `idt_set(vec, off, sel, attr)`, `idt_load()`.
+`serial_init()`, `serial_putc(c)`, `serial_puts(s)`, `serial_poll()`
+(1/0), `serial_getc()` (byte or -1) — COM1 16550 at `0x3F8`, 115200 8N1,
+the kernel log channel (`74_serial`, QEMU `-serial stdio`).
 `templates/52_timer.c4p` remaps the PIC, programs the PIT to 100Hz,
 installs IRQ0 and counts ticks (link `rt/irq.s` into the kernel).
 `templates/54_keyboard.c4p` adds IRQ1, reads typed lines via `key()`
@@ -667,6 +691,12 @@ real hardware):
   Bounded conditions with inline spins (`while gotline == 0`) are solid;
   `-d nochain` also makes it vanish. Suspected TCG translation-caching
   interaction, not guest logic — every frame/esp/state dump reads healthy.
+* Current MinGW `ld` computes PE section VMAs as image-base + script
+  offset, so the kernel recipes need `--image-base 0x0` with
+  `boot/linkflat.ld` (for VMA `0x10000`) and `boot/bootlink.ld` (for
+  `0x7C00`); without it even known-good kernels fail with `section
+  below image base`. See `templates/74_serial.c4p` for the working
+  link lines.
 
 ## 13. REPL
 
@@ -697,6 +727,14 @@ Common ones: `UnknownVariable`, `KeyMissing`, `IndexOutOfBounds`,
 `CallDepthExceeded` (function-call depth cap 1000 — enough for
 deep recursion; the interpreter runs on a 64MB stack so 1000
 levels are real frames, not a fake limit).
+
+Conditions bite twice: `if`/`elif`/`while` conditions evaluate once
+while parsing (to find their end) and again when running, and
+`and`/`or` always evaluate both sides. Keep conditions pure and
+bounds-safe — no calls with computed indices, no channel ops, no
+`yield` in there. (`templates/73_lex.c4p` header documents the
+discipline: hoist tests into `let`s, nest `if`/`else`, break out
+of loops instead of compound conditions.)
 
 ## 16. `c4c fmt` style
 

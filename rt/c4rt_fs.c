@@ -543,6 +543,44 @@ C4Val c4_inw(C4Val port) {
     __asm__ volatile("inw %1, %0" : "=a"(v) : "Nd"((unsigned short)c4_tonum(port)));
     return c4_num((double)v);
 }
+/* ---- 0.4.3: COM1 serial log (16550 UART at 0x3F8, 115200 8N1).
+ * The kernel's printf-independent log channel: QEMU `-serial stdio`
+ * shows everything written here on the host terminal. ---- */
+#define C4_COM1 0x3F8
+C4Val c4_serial_init(void) {
+    c4_outb_raw(C4_COM1 + 1, 0x00);
+    c4_outb_raw(C4_COM1 + 3, 0x80);
+    c4_outb_raw(C4_COM1 + 0, 0x01);
+    c4_outb_raw(C4_COM1 + 1, 0x00);
+    c4_outb_raw(C4_COM1 + 3, 0x03);
+    c4_outb_raw(C4_COM1 + 2, 0xC7);
+    c4_outb_raw(C4_COM1 + 4, 0x0B);
+    return c4_nil();
+}
+static void c4_serial_putc_raw(unsigned char c) {
+    while (!(c4_inb_raw(C4_COM1 + 5) & 0x20)) {
+    }
+    c4_outb_raw(C4_COM1, c);
+}
+C4Val c4_serial_putc(C4Val ch) {
+    c4_serial_putc_raw((unsigned char)c4_tonum(ch));
+    return c4_nil();
+}
+C4Val c4_serial_puts(C4Val s) {
+    if (s.t != 1)
+        c4_err("TypeError");
+    for (const char *p = s.str; *p; p++)
+        c4_serial_putc_raw((unsigned char)*p);
+    return c4_nil();
+}
+C4Val c4_serial_poll(void) {
+    return c4_num((c4_inb_raw(C4_COM1 + 5) & 0x01) ? 1 : 0);
+}
+C4Val c4_serial_getc(void) {
+    if (!(c4_inb_raw(C4_COM1 + 5) & 0x01))
+        return c4_num(-1);
+    return c4_num((double)c4_inb_raw(C4_COM1));
+}
 /* ---- 0.3.5: paging, kernel heap, syscalls ---- */
 C4Val c4_poke32(C4Val addr, C4Val val) {
     unsigned long a = (unsigned long)c4_tonum(addr);

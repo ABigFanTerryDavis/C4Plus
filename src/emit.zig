@@ -1588,7 +1588,7 @@ pub const Emitter = struct {
         const mod = try self.parseIdent();
         try self.expectEnd();
         if (self.fs) return self.fail("import {s} not in freestanding emit", .{mod});
-        if (std.mem.eql(u8, mod, "os") or std.mem.eql(u8, mod, "physics") or std.mem.eql(u8, mod, "time") or std.mem.eql(u8, mod, "cpu") or std.mem.eql(u8, mod, "heap") or std.mem.eql(u8, mod, "json") or std.mem.eql(u8, mod, "hex") or std.mem.eql(u8, mod, "random") or std.mem.eql(u8, mod, "strings") or std.mem.eql(u8, mod, "csv") or std.mem.eql(u8, mod, "mem") or std.mem.eql(u8, mod, "block")) {
+        if (std.mem.eql(u8, mod, "os") or std.mem.eql(u8, mod, "physics") or std.mem.eql(u8, mod, "time") or std.mem.eql(u8, mod, "cpu") or std.mem.eql(u8, mod, "heap") or std.mem.eql(u8, mod, "json") or std.mem.eql(u8, mod, "hex") or std.mem.eql(u8, mod, "random") or std.mem.eql(u8, mod, "strings") or std.mem.eql(u8, mod, "csv") or std.mem.eql(u8, mod, "mem") or std.mem.eql(u8, mod, "block") or std.mem.eql(u8, mod, "fat")) {
             try self.mods.put(try self.alloc.dupe(u8, mod), true);
             return;
         }
@@ -2056,6 +2056,14 @@ pub const Emitter = struct {
                 if (args.len != 1) return self.fail("inw(port) takes 1 arg", .{});
                 return try std.fmt.allocPrint(self.alloc, "c4_inw({s})", .{args[0]});
             }
+            if (std.mem.eql(u8, name, "serial_init") or std.mem.eql(u8, name, "serial_poll") or std.mem.eql(u8, name, "serial_getc")) {
+                if (args.len != 0) return self.fail("'{s}' takes no args", .{name});
+                return try std.fmt.allocPrint(self.alloc, "c4_{s}()", .{name});
+            }
+            if (std.mem.eql(u8, name, "serial_putc") or std.mem.eql(u8, name, "serial_puts")) {
+                if (args.len != 1) return self.fail("'{s}(x)' takes 1 arg", .{name});
+                return try std.fmt.allocPrint(self.alloc, "c4_{s}({s})", .{ name, args[0] });
+            }
             if (std.mem.eql(u8, name, "sti") or std.mem.eql(u8, name, "cli")) {
                 if (args.len != 0) return self.fail("'{s}' takes no args", .{name});
                 return try std.fmt.allocPrint(self.alloc, "c4_{s}()", .{name});
@@ -2199,7 +2207,7 @@ pub const Emitter = struct {
                 return try std.fmt.allocPrint(self.alloc, "c4_flat({s})", .{args[0]});
             }
         } else {
-            const fsonly = [_][]const u8{ "outb", "inb", "inw", "sti", "cli", "ticks", "irq_addr", "idt_set", "idt_load", "key", "irq1_addr", "poke32", "peek32", "vga_clear", "vga_put", "vga_get", "vga_text", "vga_scroll", "vga_move", "vga_size", "cr3", "pg_on", "kmalloc", "kfree", "syscall", "syscall_addr", "addr", "gdt_set", "gdt_load", "tss", "enter_user", "elf_load", "user_base", "user_len", "user2_base", "user2_len", "fault_addr", "task_create", "tasks", "idle", "flat" };
+            const fsonly = [_][]const u8{ "outb", "inb", "inw", "serial_init", "serial_putc", "serial_puts", "serial_poll", "serial_getc", "sti", "cli", "ticks", "irq_addr", "idt_set", "idt_load", "key", "irq1_addr", "poke32", "peek32", "vga_clear", "vga_put", "vga_get", "vga_text", "vga_scroll", "vga_move", "vga_size", "cr3", "pg_on", "kmalloc", "kfree", "syscall", "syscall_addr", "addr", "gdt_set", "gdt_load", "tss", "enter_user", "elf_load", "user_base", "user_len", "user2_base", "user2_len", "fault_addr", "task_create", "tasks", "idle", "flat" };
             for (fsonly) |b| {
                 if (std.mem.eql(u8, name, b)) return self.fail("'{s}' is freestanding-only (kernel code via --emit-c --freestanding)", .{name});
             }
@@ -2476,6 +2484,16 @@ pub const Emitter = struct {
                 }
             }
             if (cfn == null) return self.fail("unknown block.{s} in emit v1", .{method});
+        } else if (std.mem.eql(u8, module, "fat")) {
+            if (!self.mods.contains("fat")) return self.fail("'fat' used without 'import fat'", .{});
+            const known_fat = [_][]const u8{ "format", "ls", "read", "read_text", "write", "write_text", "delete" };
+            for (known_fat) |k| {
+                if (std.mem.eql(u8, method, k)) {
+                    cfn = try std.fmt.allocPrint(self.alloc, "c4_fat_{s}", .{method});
+                    break;
+                }
+            }
+            if (cfn == null) return self.fail("unknown fat.{s} in emit v1", .{method});
         } else if (std.mem.eql(u8, module, "task")) {
             return self.fail("'task' is script-only (cooperative tasks need shared state); run it with c4c, not --emit-c", .{});
         } else if (std.mem.eql(u8, module, "cpu")) {

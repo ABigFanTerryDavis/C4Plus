@@ -1,0 +1,46 @@
+# 72_fat — a writable filesystem: format a volume, write files across
+# clusters, read them back, delete. Same FAT12 layout user/mkfat.py
+# builds for 62_fat (512 sectors, 2x2-sector FATs, 16 root entries),
+# so volumes written here are readable there and vice versa.
+# Root directory only, timestamps zeroed, names are 8.3 uppercased.
+# Same calls compile to native (c4_fat_* in rt/c4rt.c).
+
+import fat
+import block
+import os
+
+let d = block.ramdisk(512)
+fat.format(d)
+
+# small files share the volume with a multi-cluster one.
+fat.write_text(d, "note.txt", "the kernel can remember now")
+let big = ""
+let i = 0
+while i < 100 {
+  big = big + "0123456789ABCDEF"
+  i = i + 1
+}
+fat.write_text(d, "big.dat", big)
+print ("ls=" + str(fat.ls(d)))
+print ("note=" + fat.read_text(d, "note.txt"))
+print ("big-ok=" + str(fat.read_text(d, "big.dat") == big))
+
+# overwrite frees the old chain first; delete frees it entirely.
+fat.write_text(d, "note.txt", "shorter")
+print ("note2=" + fat.read_text(d, "note.txt"))
+print ("del=" + str(fat.delete(d, "big.dat")))
+print ("ls2=" + str(fat.ls(d)))
+try { fat.read_text(d, "big.dat") } catch e { print ("caught: " + e) }
+block.close(d)
+
+# file-backed: the volume survives close and reopens with its files.
+let img = "72_vol.img"
+let f = block.file(img, 512)
+fat.format(f)
+fat.write_text(f, "kept.txt", "persistent")
+block.close(f)
+let g = block.file(img, 0)
+print ("back=" + fat.read_text(g, "kept.txt"))
+block.close(g)
+os.remove(img)
+print "cleaned"

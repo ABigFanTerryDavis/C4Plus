@@ -1,0 +1,33 @@
+# 74_serial — COM1 serial log in a freestanding C4Plus kernel.
+# Build (same shape as 63_vga; --image-base works around a MinGW ld
+# behavior where PE section VMAs come out as base + script offset):
+#   c4c --emit-c 74_serial.c4p --freestanding -o serial.c
+#   gcc -m32 -ffreestanding -nostdlib -c -o serial.o serial.c -I rt
+#   gcc -m32 -ffreestanding -nostdlib -c -o fs.o rt/c4rt_fs.c
+#   as --32 rt/irq.s -o irq.o
+#   as --32 boot/boot.s -o boot.o
+#   ld -m i386pe -T boot/linkflat.ld --image-base 0x0 -o serial.pe serial.o fs.o irq.o
+#   objcopy -O binary serial.pe serial.bin
+#   ld -m i386pe -T boot/bootlink.ld --image-base 0x0 -o boot.pe boot.o
+#   objcopy -O binary -j .boot boot.pe boot.bin
+#   cat boot.bin serial.bin > sdisk.img   (pad kernel area to 96K)
+#   qemu-system-i386 -drive format=raw,file=sdisk.img -display none ^
+#     -serial stdio -device isa-debug-exit,iobase=0xf4,iosize=0x04
+# Expect: "c4plus serial alive" + count lines on the host terminal
+# via COM1 (115200 8N1), qemu exit = (code<<1)|1.
+# Script mode refuses the serial_* calls: they only work in freestanding
+# kernels (--emit-c --freestanding), like outb/inb.
+
+serial_init()
+serial_puts("c4plus serial alive\n")
+let i = 0
+while i < 5 {
+  serial_puts("tick ")
+  serial_putc(48 + i)
+  serial_puts("\n")
+  i = i + 1
+}
+serial_puts("poll=")
+serial_putc(48 + serial_poll())
+serial_puts("\n")
+exit(0)

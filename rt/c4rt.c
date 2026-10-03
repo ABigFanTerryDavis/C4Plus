@@ -2666,6 +2666,377 @@ C4Val c4_block_stats(C4Val h) {
     return st;
 }
 
+/* ======== fat module (0.4.3): FAT12 with a write path on block devices.
+   Stateless: BPB/FAT/root re-read per call. Geometry mirrors user/mkfat.py
+   (512 sectors, 2x2-sector FATs, 16 root entries, data at rel sector 6).
+   Catchable failures use c4_fail with the interpreter's exact strings. ======== */
+
+#define C4_FAT_SECTORS 512
+#define C4_FAT_NFATS 2
+#define C4_FAT_ROOTN 16
+#define C4_FAT_ROOTLBA (1 + 2 * C4_FAT_NFATS)
+#define C4_FAT_DATALBA (C4_FAT_ROOTLBA + 1)
+
+static void c4_fat_fail(const char *op, const char *msg) {
+    char b[128];
+    snprintf(b, sizeof b, "fat %s %s", op, msg);
+    c4_fail(b);
+}
+
+static unsigned c4_fat_rd16(const unsigned char *b, size_t off) {
+    return (unsigned)b[off] | ((unsigned)b[off + 1] << 8);
+}
+
+static void c4_fat_wr16(unsigned char *b, size_t off, unsigned v) {
+    b[off] = (unsigned char)(v & 0xFF);
+    b[off + 1] = (unsigned char)((v >> 8) & 0xFF);
+}
+
+static void c4_fat_wr32(unsigned char *b, size_t off, unsigned long v) {
+    b[off] = (unsigned char)(v & 0xFF);
+    b[off + 1] = (unsigned char)((v >> 8) & 0xFF);
+    b[off + 2] = (unsigned char)((v >> 16) & 0xFF);
+    b[off + 3] = (unsigned char)((v >> 24) & 0xFF);
+}
+
+static unsigned c4_fat_get12(const unsigned char *fat, unsigned cl) {
+    size_t off = cl + cl / 2;
+    if (cl % 2 == 0)
+        return (unsigned)fat[off] | (((unsigned)fat[off + 1] & 0x0F) << 8);
+    return (((unsigned)fat[off] & 0xF0) >> 4) | ((unsigned)fat[off + 1] << 4);
+}
+
+static void c4_fat_set12(unsigned char *fat, unsigned cl, unsigned val) {
+    size_t off = cl + cl / 2;
+    if (cl % 2 == 0) {
+        fat[off] = (unsigned char)(val & 0xFF);
+        fat[off + 1] = (unsigned char)((fat[off + 1] & 0xF0) | ((val >> 8) & 0x0F));
+    } else {
+        fat[off] = (unsigned char)((fat[off] & 0x0F) | ((val << 4) & 0xF0));
+        fat[off + 1] = (unsigned char)((val >> 4) & 0xFF);
+    }
+}
+
+static C4BlockDev *c4_fat_dev(C4Val h, const char *op) {
+    C4BlockDev *d = c4_block_dev(h);
+    unsigned char boot[512];
+    if (d->sectors != C4_FAT_SECTORS)
+        c4_fat_fail(op, "bad filesystem");
+    c4_block_get(d, boot, 0, op);
+    if (boot[510] != 0x55 || boot[511] != 0xAA || c4_fat_rd16(boot, 11) != 512)
+        c4_fat_fail(op, "bad filesystem");
+    return d;
+}
+
+static void c4_fat_getfat(C4BlockDev *d, unsigned char *fat, const char *op) {
+    for (int k = 0; k < C4_FAT_NFATS; k++)
+        c4_block_get(d, fat + (size_t)k * 512, 1 + k, op);
+}
+
+static void c4_fat_putfat(C4BlockDev *d, const unsigned char *fat, const char *op) {
+    for (int k = 0; k < C4_FAT_NFATS; k++) {
+        c4_block_put(d, fat + (size_t)k * 512, 1 + k, op);
+        c4_block_put(d, fat + (size_t)k * 512, 1 + C4_FAT_NFATS + k, op);
+    }
+}
+
+/* name83: split at first dot, 1-8 + 0-3 chars, uppercase, space-pad. */
+static int c4_fat_name(const char *s, unsigned char out[11], const char *op) {
+    (void)op;
+    size_t len = strlen(s);
+    if (len == 0 || len > 12)
+        return -1;
+    const char *dot = strchr(s, '.');
+    if (dot && strchr(dot + 1, '.'))
+        return -1;
+    size_t ni = dot ? (size_t)(dot - s) : len;
+    size_t ei = dot ? (size_t)(dot + 1 - s) : len;
+    if (ni == 0 || ni > 8 || len - ei > 3)
+        return -1;
+    for (int i = 0; i < 11; i++)
+        out[i] = ' ';
+    for (size_t i = 0; i < ni; i++)
+        out[i] = (unsigned char)toupper((unsigned char)s[i]);
+    for (size_t i = ei; i < len; i++)
+        out[8 + i - ei] = (unsigned char)toupper((unsigned char)s[i]);
+    return 0;
+}
+
+static int c4_fat_find(C4BlockDev *d, const unsigned char nm[11], int *is_new, const char *op) {
+    unsigned char root[512];
+    c4_block_get(d, root, C4_FAT_ROOTLBA, op);
+    int first_empty = -1;
+    for (int i = 0; i < C4_FAT_ROOTN; i++) {
+        const unsigned char *e = root + (size_t)i * 32;
+        if (e[0] == 0x00) {
+            *is_new = 1;
+            return first_empty >= 0 ? first_empty : i;
+        }
+        if (e[0] == 0xE5) {
+            if (first_empty < 0)
+                first_empty = i;
+            continue;
+        }
+        if (memcmp(e, nm, 11) == 0) {
+            *is_new = 0;
+            return i;
+        }
+    }
+    if (first_empty >= 0) {
+        *is_new = 1;
+        return first_empty;
+    }
+    return -1;
+}
+
+C4Val c4_fat_format(C4Val h) {
+    C4BlockDev *d = c4_block_dev(h);
+    if (d->sectors != C4_FAT_SECTORS)
+        c4_fat_fail("format", "bad filesystem");
+    unsigned char bs[512];
+    memset(bs, 0, sizeof bs);
+    bs[0] = 0xEB;
+    bs[1] = 0x3C;
+    bs[2] = 0x90;
+    memcpy(bs + 3, "C4PLUS  ", 8);
+    c4_fat_wr16(bs, 11, 512);
+    bs[13] = 1;
+    c4_fat_wr16(bs, 14, 1);
+    bs[16] = 2;
+    c4_fat_wr16(bs, 17, C4_FAT_ROOTN);
+    c4_fat_wr16(bs, 19, C4_FAT_SECTORS);
+    bs[21] = 0xF0;
+    c4_fat_wr16(bs, 22, C4_FAT_NFATS);
+    c4_fat_wr16(bs, 24, 18);
+    c4_fat_wr16(bs, 26, 2);
+    bs[510] = 0x55;
+    bs[511] = 0xAA;
+    c4_block_put(d, bs, 0, "format");
+    unsigned char fat[C4_FAT_NFATS * 512];
+    memset(fat, 0, sizeof fat);
+    fat[0] = 0xF0;
+    fat[1] = 0xFF;
+    fat[2] = 0xFF;
+    c4_fat_putfat(d, fat, "format");
+    unsigned char z[512];
+    memset(z, 0, sizeof z);
+    c4_block_put(d, z, C4_FAT_ROOTLBA, "format");
+    for (size_t lba = C4_FAT_DATALBA; lba < C4_FAT_SECTORS; lba++)
+        c4_block_put(d, z, (long)lba, "format");
+    return c4_nil();
+}
+
+C4Val c4_fat_ls(C4Val h) {
+    C4BlockDev *d = c4_fat_dev(h, "ls");
+    unsigned char root[512];
+    c4_block_get(d, root, C4_FAT_ROOTLBA, "ls");
+    C4Val o = c4_list();
+    for (int i = 0; i < C4_FAT_ROOTN; i++) {
+        const unsigned char *e = root + (size_t)i * 32;
+        if (e[0] == 0x00)
+            break;
+        if (e[0] == 0xE5 || (e[11] & 0x08))
+            continue;
+        char nm[13];
+        size_t ni = 8;
+        while (ni > 0 && e[ni - 1] == ' ')
+            ni--;
+        size_t ei = 3;
+        while (ei > 0 && e[8 + ei - 1] == ' ')
+            ei--;
+        memcpy(nm, e, ni);
+        size_t ln = ni;
+        if (ei > 0) {
+            nm[ln++] = '.';
+            memcpy(nm + ln, e + 8, ei);
+            ln += ei;
+        }
+        nm[ln] = 0;
+        list_push(o.list, c4_strn(nm, ln));
+    }
+    return o;
+}
+
+static unsigned long c4_fat_size(const unsigned char *e) {
+    return (unsigned long)e[28] | ((unsigned long)e[29] << 8) | ((unsigned long)e[30] << 16) | ((unsigned long)e[31] << 24);
+}
+
+static C4Val c4_fat_doread(C4Val h, C4Val n, const char *op) {
+    if (n.t != C4_STR)
+        c4_err("TypeError");
+    unsigned char nm[11];
+    if (c4_fat_name(n.str, nm, op))
+        c4_err("TypeError");
+    C4BlockDev *d = c4_fat_dev(h, op);
+    unsigned char root[512];
+    c4_block_get(d, root, C4_FAT_ROOTLBA, op);
+    for (int i = 0; i < C4_FAT_ROOTN; i++) {
+        const unsigned char *e = root + (size_t)i * 32;
+        if (e[0] == 0x00)
+            break;
+        if (e[0] == 0xE5 || memcmp(e, nm, 11) != 0)
+            continue;
+        unsigned long size = c4_fat_size(e);
+        unsigned cl = c4_fat_rd16(e, 26);
+        C4Val o = c4_list();
+        if (cl == 0) {
+            if (size != 0)
+                c4_fat_fail(op, "bad filesystem");
+            return o;
+        }
+        unsigned char fat[C4_FAT_NFATS * 512];
+        c4_fat_getfat(d, fat, op);
+        unsigned long left = size;
+        while (1) {
+            if (cl < 2 || cl - 2 >= (unsigned)(C4_FAT_SECTORS - C4_FAT_DATALBA))
+                c4_fat_fail(op, "bad filesystem");
+            unsigned char sec[512];
+            c4_block_get(d, sec, C4_FAT_DATALBA + cl - 2, op);
+            size_t take = left > 512 ? 512 : (size_t)left;
+            for (size_t k = 0; k < take; k++)
+                list_push(o.list, c4_num((double)sec[k]));
+            left -= take;
+            if (left == 0)
+                break;
+            unsigned nx = c4_fat_get12(fat, cl);
+            if (nx < 2 || nx >= 0xFF8)
+                c4_fat_fail(op, "bad filesystem");
+            cl = nx;
+        }
+        return o;
+    }
+    c4_fat_fail(op, "not found");
+    return c4_nil();
+}
+
+C4Val c4_fat_read(C4Val h, C4Val n) {
+    return c4_fat_doread(h, n, "read");
+}
+
+C4Val c4_fat_read_text(C4Val h, C4Val n) {
+    C4Val l = c4_fat_doread(h, n, "read_text");
+    size_t end = 0;
+    while (end < l.list->len && l.list->items[end].num != 0)
+        end++;
+    char *buf = xmalloc(end + 1);
+    for (size_t i = 0; i < end; i++)
+        buf[i] = (char)l.list->items[i].num;
+    buf[end] = 0;
+    C4Val v;
+    v.t = C4_STR;
+    v.str = buf;
+    return v;
+}
+
+static void c4_fat_freechain(unsigned char *fat, unsigned cl, const char *op) {
+    while (cl >= 2 && cl < 0xFF8) {
+        if (cl - 2 >= C4_FAT_SECTORS - C4_FAT_DATALBA)
+            c4_fat_fail(op, "bad filesystem");
+        unsigned nx = c4_fat_get12(fat, cl);
+        c4_fat_set12(fat, cl, 0);
+        if (nx >= 0xFF8)
+            break;
+        cl = nx;
+    }
+}
+
+static C4Val c4_fat_dowrite(C4Val h, C4Val n, C4Val data, const char *op) {
+    if (n.t != C4_STR)
+        c4_err("TypeError");
+    unsigned char nm[11];
+    if (c4_fat_name(n.str, nm, op))
+        c4_err("TypeError");
+    if (data.t != C4_LIST)
+        c4_err("TypeError");
+    for (size_t i = 0; i < data.list->len; i++) {
+        C4Val v = data.list->items[i];
+        if (v.t != C4_NUM || v.num != trunc(v.num) || v.num < 0 || v.num > 255)
+            c4_err("TypeError");
+    }
+    C4BlockDev *d = c4_fat_dev(h, op);
+    int is_new = 1;
+    int slot = c4_fat_find(d, nm, &is_new, op);
+    if (slot < 0)
+        c4_fat_fail(op, "dir full");
+    unsigned char root[512];
+    c4_block_get(d, root, C4_FAT_ROOTLBA, op);
+    unsigned char fat[C4_FAT_NFATS * 512];
+    c4_fat_getfat(d, fat, op);
+    if (!is_new) {
+        unsigned oc = c4_fat_rd16(root + (size_t)slot * 32, 26);
+        if (oc != 0)
+            c4_fat_freechain(fat, oc, op);
+    }
+    size_t len = data.list->len, need = (len + 511) / 512;
+    unsigned maxcl = C4_FAT_SECTORS - C4_FAT_DATALBA + 2;
+    unsigned chain[512];
+    size_t got = 0;
+    for (unsigned c = 2; got < need && c < maxcl; c++)
+        if (c4_fat_get12(fat, c) == 0)
+            chain[got++] = c;
+    if (got < need)
+        c4_fat_fail(op, "no space");
+    for (size_t k = 0; k < need; k++) {
+        unsigned nx = k + 1 < need ? chain[k + 1] : 0xFFF;
+        c4_fat_set12(fat, chain[k], nx);
+        unsigned char sec[512];
+        memset(sec, 0, sizeof sec);
+        size_t off = k * 512, chunk = len - off > 512 ? 512 : len - off;
+        for (size_t i = 0; i < chunk; i++)
+            sec[i] = (unsigned char)data.list->items[off + i].num;
+        c4_block_put(d, sec, C4_FAT_DATALBA + chain[k] - 2, op);
+    }
+    c4_fat_putfat(d, fat, op);
+    unsigned char *e = root + (size_t)slot * 32;
+    memcpy(e, nm, 11);
+    e[11] = 0x20;
+    memset(e + 12, 0, 14);
+    c4_fat_wr16(e, 26, need == 0 ? 0 : chain[0]);
+    c4_fat_wr32(e, 28, (unsigned long)len);
+    c4_block_put(d, root, C4_FAT_ROOTLBA, op);
+    return c4_nil();
+}
+
+C4Val c4_fat_write(C4Val h, C4Val n, C4Val data) {
+    return c4_fat_dowrite(h, n, data, "write");
+}
+
+C4Val c4_fat_write_text(C4Val h, C4Val n, C4Val t) {
+    if (t.t != C4_STR)
+        c4_err("TypeError");
+    size_t len = strlen(t.str);
+    C4Val l = c4_list();
+    for (size_t i = 0; i < len; i++)
+        list_push(l.list, c4_num((double)(unsigned char)t.str[i]));
+    return c4_fat_dowrite(h, n, l, "write_text");
+}
+
+C4Val c4_fat_delete(C4Val h, C4Val n) {
+    if (n.t != C4_STR)
+        c4_err("TypeError");
+    unsigned char nm[11];
+    if (c4_fat_name(n.str, nm, "delete"))
+        c4_err("TypeError");
+    C4BlockDev *d = c4_fat_dev(h, "delete");
+    int is_new = 1;
+    int slot = c4_fat_find(d, nm, &is_new, "delete");
+    if (slot < 0 || is_new)
+        return c4_num(0);
+    unsigned char root[512];
+    c4_block_get(d, root, C4_FAT_ROOTLBA, "delete");
+    unsigned char *e = root + (size_t)slot * 32;
+    unsigned oc = c4_fat_rd16(e, 26);
+    if (oc != 0) {
+        unsigned char fat[C4_FAT_NFATS * 512];
+        c4_fat_getfat(d, fat, "delete");
+        c4_fat_freechain(fat, oc, "delete");
+        c4_fat_putfat(d, fat, "delete");
+    }
+    e[0] = 0xE5;
+    c4_block_put(d, root, C4_FAT_ROOTLBA, "delete");
+    return c4_num(1);
+}
+
 /* ======== emit parity additions (0.3.5): json, hex, random, crc32,
    collections, strings extras, time extras. All errors route through
    c4_err so try/catch catches them like the interpreter. ======== */

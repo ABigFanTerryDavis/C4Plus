@@ -756,6 +756,11 @@ typed access, native-compiled), a storage stack (`70_block` — ramdisk/file ima
 512-byte sectors, native-compiled), and cooperative tasks (`71_task` — named
 functions run as steps, channels, protothread-style, script-only since emitted
 functions cannot see globals).
+Self-reliance: a writable FAT12 on block devices (`72_fat` — format/ls/read/
+write/delete, same layout `mkfat.py` builds, native-compiled), the lexer
+written in C4Plus (`73_lex` — token-identical to `c4c lex` over the corpus),
+and a COM1 serial log for kernels (`74_serial` — 115200 8N1, live-verified
+under QEMU `-serial stdio`).
 
 ### Kernel meter
 
@@ -769,12 +774,12 @@ filesystem, more drivers (serial disk DMA, sound, network), and a fuller shell.
 ## Repository layout
 
 ```
-src/            c4c/c4pp implementation (Zig): main.zig, emit.zig, gui.zig, proc.zig, sock.zig, mem.zig, block.zig
+src/            c4c/c4pp implementation (Zig): main.zig, emit.zig, gui.zig, proc.zig, sock.zig, mem.zig, block.zig, fat.zig
 rt/             runtimes: c4rt.c/h (hosted), c4rt_fs.c/h (freestanding), irq.s, userblob.c
 boot/           stage-1 boot sector + linker scripts
 user/           ring-3 programs (hello.s, pong.s) + mkelf.py ELF wrapper
 examples/       small programs per feature (also used as tests)
-templates/      numbered walkthroughs 01_hello .. 71_task (+ .c4asm sidecars)
+templates/      numbered walkthroughs 01_hello .. 74_serial (+ .c4asm sidecars)
 build.zig       build definition (version lives here)
 build.zig.zon   package manifest (version mirrored here)
 DOCS.md         full language + kernel reference
@@ -785,7 +790,9 @@ zip/            local release snapshots (kept out of git; use GitHub releases)
 `44_kmain` → `52_timer` → `54_keyboard` → `55_paging` → `56_syscall` → `58_usermode` →
 `59_sched` → `61_ata` → `62_fat` → `63_vga` → `64_shell` → `65_exec` → `66_vga` for the
 kernel path, then `67_socket` → `68_chat` for TCP and `69_mem` → `70_block` →
-`71_task` for the systems trio. Every kernel template header documents its exact build recipe.
+`71_task` for the systems trio, then `72_fat` → `73_lex` → `74_serial` for
+self-reliance (writable disk, self-hosted lexer, serial log). Every kernel
+template header documents its exact build recipe.
 
 ---
 
@@ -820,6 +827,13 @@ stays out of git; public releases go through GitHub releases.
   native-compiled, `70_block`), `task` (cooperative `spawn/yield/exit/sleep`,
   `chan/send/recv` channels, `run/step` scheduler, protothread-style shared
   state, script-only, `71_task`).
+- **0.4.3 (this):** self-reliance — `fat` (writable FAT12: `format/ls/read/
+  read_text/write/write_text/delete` on `block` devices, mkfat-compatible,
+  native-compiled, `72_fat`), `73_lex` (the lexer in C4Plus, token-identical
+  to `c4c lex` across 151 corpus files via `zig-out/lexdiff.py`), `serial_*`
+  freestanding builtins (COM1 log channel, `74_serial`, QEMU-verified).
+  Plus a toolchain-drift fix documented in DOCS QEMU notes (current MinGW
+  `ld` needs `--image-base 0x0` with the kernel linker scripts).
 - After that: writable filesystem, more drivers, fuller shell.
 
 ---

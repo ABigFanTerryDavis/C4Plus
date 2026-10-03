@@ -1,0 +1,423 @@
+# 73_lex — the C4Plus lexer written in C4Plus: a shadow lexer emitting
+# `kind:text:line` rows (split rows on the FIRST and LAST colon).
+# Kinds: keyword ident number string op comment nl error. The 24 reserved
+# words always lex as keyword. Unary minus joins a number only when an
+# operand is expected (tracked with a one-token lookbehind). Strings map
+# escapes like the interpreter and re-encode \, newline, tab, CR on output.
+# `..` is one op; `.` + digit starts a number; `#` and `//` run to newline.
+# Run: c4c 73_lex.c4p <file.c4p> — must match `c4c lex <file.c4p>` exactly.
+# (Corpus differential lives in zig-out/lexdiff.py.)
+# Interpreted only: the keyword/operator tables are globals, which
+# --emit-c cannot see (same wall as task bodies); hence no native build.
+#
+# Coding discipline (interpreter warts): if/elif/while conditions evaluate
+# more than once, and and/or evaluate both sides, so NOTHING pos-dependent
+# may appear in a condition. Every test below reads a plain variable or a
+# safely-guarded substring; all calls with computed indices sit in statement
+# position behind nested ifs. Inner loops use break, never compound conds.
+
+import os
+
+let kws = ["let", "print", "pt", "fn", "struct", "if", "elif", "else", "while", "for", "in", "switch", "try", "catch", "return", "break", "continue", "import", "and", "or", "not"]
+let oneops = "+-*/%&|^~<>=!()[]{}.,:;"
+
+fn iskw(w) {
+  let i = 0
+  while i < len(kws) {
+    if kws[i] == w {
+      return 1
+    }
+    i = i + 1
+  }
+  return 0
+}
+
+fn isop1(ch) {
+  let i = 0
+  while i < len(oneops) {
+    if substr(oneops, i, 1) == ch {
+      return 1
+    }
+    i = i + 1
+  }
+  return 0
+}
+
+fn isdig(ch) {
+  let c = ord(ch)
+  return c >= 48 and c <= 57
+}
+
+fn isalpha(ch) {
+  let c = ord(ch)
+  let r1 = c >= 65 and c <= 90
+  let r2 = c >= 97 and c <= 122
+  let r3 = c == 95
+  if r1 {
+    return 1
+  } else {
+    if r2 {
+      return 1
+    } else {
+      return r3
+    }
+  }
+}
+
+fn isalnum(ch) {
+  let a = isalpha(ch)
+  if a {
+    return 1
+  } else {
+    return isdig(ch)
+  }
+}
+
+fn row(kind, text, line) {
+  print (kind + ":" + text + ":" + str(line))
+}
+
+fn lex(src) {
+  let pos = 0
+  let line = 1
+  let n = len(src)
+  let want = 1
+  while pos < n {
+    let c = substr(src, pos, 1)
+    let is_ws = c == " " or c == "\t" or c == "\r"
+    if is_ws {
+      pos = pos + 1
+    } else {
+      let is_nl = c == "\n"
+      if is_nl {
+        row("nl", "", line)
+        line = line + 1
+        pos = pos + 1
+        want = 1
+      } else {
+        let is_hash = c == "#"
+        let has_next = pos + 1 < n
+        let is_slash2 = 0
+        if has_next {
+          if substr(src, pos + 1, 1) == "/" {
+            if c == "/" {
+              is_slash2 = 1
+            }
+          }
+        }
+        if is_hash {
+          let start = pos
+          while pos < n {
+            if substr(src, pos, 1) == "\n" {
+              break
+            }
+            pos = pos + 1
+          }
+          row("comment", substr(src, start, pos - start), line)
+        } else {
+          if is_slash2 {
+            let start = pos
+            while pos < n {
+              if substr(src, pos, 1) == "\n" {
+                break
+              }
+              pos = pos + 1
+            }
+            row("comment", substr(src, start, pos - start), line)
+          } else {
+            if isalpha(c) {
+              let start = pos
+              while pos < n {
+                if isalnum(substr(src, pos, 1)) {
+                  pos = pos + 1
+                } else {
+                  break
+                }
+              }
+              let w = substr(src, start, pos - start)
+              if iskw(w) {
+                row("keyword", w, line)
+                want = 1
+              } else {
+                row("ident", w, line)
+                want = 0
+              }
+            } else {
+              let neg_num = 0
+              if c == "-" {
+                if want == 1 {
+                  if has_next {
+                    let nx = substr(src, pos + 1, 1)
+                    if isdig(nx) {
+                      neg_num = 1
+                    } else {
+                      if nx == "." {
+                        let has_next2 = pos + 2 < n
+                        if has_next2 {
+                          if isdig(substr(src, pos + 2, 1)) {
+                            neg_num = 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+              if neg_num {
+                let start = pos
+                pos = pos + 1
+                while pos < n {
+                  if isdig(substr(src, pos, 1)) {
+                    pos = pos + 1
+                  } else {
+                    break
+                  }
+                }
+                if has_next {
+                  let dotnow = substr(src, pos, 1) == "."
+                  if dotnow {
+                    let has_after = pos + 1 < n
+                    if has_after {
+                      if isdig(substr(src, pos + 1, 1)) {
+                        pos = pos + 1
+                        while pos < n {
+                          if isdig(substr(src, pos, 1)) {
+                            pos = pos + 1
+                          } else {
+                            break
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+                row("number", substr(src, start, pos - start), line)
+                want = 0
+              } else {
+                let dig_now = isdig(c)
+                let dot_num = 0
+                if c == "." {
+                  if has_next {
+                    if isdig(substr(src, pos + 1, 1)) {
+                      dot_num = 1
+                    }
+                  }
+                }
+                if dig_now {
+                  let start = pos
+                  while pos < n {
+                    if isdig(substr(src, pos, 1)) {
+                      pos = pos + 1
+                    } else {
+                      break
+                    }
+                  }
+                  if substr(src, start, 1) != "." {
+                    let has_dot = pos + 1 < n
+                    if has_dot {
+                      if substr(src, pos, 1) == "." {
+                        if isdig(substr(src, pos + 1, 1)) {
+                          pos = pos + 1
+                          while pos < n {
+                            if isdig(substr(src, pos, 1)) {
+                              pos = pos + 1
+                            } else {
+                              break
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                  row("number", substr(src, start, pos - start), line)
+                  want = 0
+                } else {
+                  if dot_num {
+                    let start = pos
+                    while pos < n {
+                      if isdig(substr(src, pos, 1)) {
+                        pos = pos + 1
+                      } else {
+                        break
+                      }
+                    }
+                    row("number", substr(src, start, pos - start), line)
+                    want = 0
+                  } else {
+                    let is_quote = c == "\"" or c == "'"
+                    if is_quote {
+                      let tline = line
+                      pos = pos + 1
+                      let parts = []
+                      let closed = 0
+                      while pos < n {
+                        let d = substr(src, pos, 1)
+                        if d == "\n" {
+                          break
+                        }
+                        if d == c {
+                          closed = 1
+                          pos = pos + 1
+                          break
+                        }
+                        if d == "\\" {
+                          let has_esc = pos + 1 < n
+                          if has_esc {
+                            let e = substr(src, pos + 1, 1)
+                            if e == "n" {
+                              push(parts, "\n")
+                            } else {
+                              if e == "t" {
+                                push(parts, "\t")
+                              } else {
+                                if e == "r" {
+                                  push(parts, "\r")
+                                } else {
+                                  if e == "\"" {
+                                    push(parts, "\"")
+                                  } else {
+                                    if e == "'" {
+                                      push(parts, "'")
+                                    } else {
+                                      if e == "\\" {
+                                        push(parts, "\\")
+                                      } else {
+                                        push(parts, e)
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                            pos = pos + 2
+                          } else {
+                            push(parts, d)
+                            pos = pos + 1
+                          }
+                        } else {
+                          push(parts, d)
+                          pos = pos + 1
+                        }
+                      }
+                      if closed == 0 {
+                        row("error", "UnterminatedString", tline)
+                        return 0
+                      }
+                      let enc = []
+                      let i = 0
+                      while i < len(parts) {
+                        let ch = parts[i]
+                        if ch == "\\" {
+                          push(enc, "\\\\")
+                        } else {
+                          if ch == "\n" {
+                            push(enc, "\\n")
+                          } else {
+                            if ch == "\t" {
+                              push(enc, "\\t")
+                            } else {
+                              if ch == "\r" {
+                                push(enc, "\\r")
+                              } else {
+                                push(enc, ch)
+                              }
+                            }
+                          }
+                        }
+                        i = i + 1
+                      }
+                      row("string", join(enc, ""), tline)
+                      want = 0
+                    } else {
+                      let is_dotdot = 0
+                      if c == "." {
+                        if has_next {
+                          if substr(src, pos + 1, 1) == "." {
+                            is_dotdot = 1
+                          }
+                        }
+                      }
+                      if is_dotdot {
+                        row("op", "..", line)
+                        pos = pos + 2
+                        want = 1
+                      } else {
+                        let is_two = 0
+                        let two = ""
+                        if has_next {
+                          let pair = substr(src, pos, 2)
+                          if pair == "==" {
+                            is_two = 1
+                            two = pair
+                          } else {
+                            if pair == "!=" {
+                              is_two = 1
+                              two = pair
+                            } else {
+                              if pair == "<=" {
+                                is_two = 1
+                                two = pair
+                              } else {
+                                if pair == ">=" {
+                                  is_two = 1
+                                  two = pair
+                                } else {
+                                  if pair == "<<" {
+                                    is_two = 1
+                                    two = pair
+                                  } else {
+                                    if pair == ">>" {
+                                      is_two = 1
+                                      two = pair
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                        if is_two {
+                          row("op", two, line)
+                          pos = pos + 2
+                          want = 1
+                        } else {
+                          if isop1(c) {
+                            row("op", c, line)
+                            pos = pos + 1
+                            if c == ")" {
+                              want = 0
+                            } else {
+                              if c == "]" {
+                                want = 0
+                              } else {
+                                if c == "}" {
+                                  want = 0
+                                } else {
+                                  want = 1
+                                }
+                              }
+                            }
+                          } else {
+                            row("error", "BadChar", line)
+                            return 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return 1
+}
+
+if len(args()) == 0 {
+  print "usage: c4c 73_lex.c4p <file.c4p>"
+} else {
+  lex(os.read(args()[0]))
+}

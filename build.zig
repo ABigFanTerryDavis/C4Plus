@@ -40,6 +40,14 @@ fn addTool(
         .target = target,
         .optimize = optimize,
     });
+    const fat_mod = b.createModule(.{
+        .root_source_file = b.path("src/fat.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "block", .module = block_mod },
+        },
+    });
     const exe = b.addExecutable(.{
         .name = name,
         .root_module = b.createModule(.{
@@ -54,6 +62,7 @@ fn addTool(
                 .{ .name = "sock", .module = sock_mod },
                 .{ .name = "mem", .module = mem_mod },
                 .{ .name = "block", .module = block_mod },
+                .{ .name = "fat", .module = fat_mod },
             },
         }),
     });
@@ -69,7 +78,7 @@ fn addTool(
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const version = "0.4.2";
+    const version = "0.4.3";
 
     const c4c = addTool(b, "c4c", version, target, optimize);
     _ = addTool(b, "c4pp", version, target, optimize);
