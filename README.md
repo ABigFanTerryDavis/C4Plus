@@ -762,6 +762,8 @@ cluster chains, multi-cluster files), a VGA text console at `0xB8000` with scrol
 hardware cursor (`63_vga`), an interactive shell with `ls`/`cat`/`help`/`ver`/`poweroff`
 over keyboard line input (`64_shell`), and `run FILE` executing ELFs straight off disk
 into ring-3 tasks (`65_exec` — `flat()` flattens a file list for the ELF loader).
+The shell also writes: `save NAME TEXT...` and `rm NAME` on the same FAT12
+write path as `75_fatwrite`.
 Script-side networking and data: a TCP echo server + chat client (`67_socket` →
 `68_chat` — `connect/listen/accept/send/recv/recv_line/close`, errors catchable)
 and CSV tables (`csv.parse/stringify` with quoting + custom separators, native-compiled).
@@ -793,7 +795,7 @@ rt/             runtimes: c4rt.c/h (hosted), c4rt_fs.c/h (freestanding), irq.s, 
 boot/           stage-1 boot sector + linker scripts
 user/           ring-3 programs (hello.s, pong.s) + mkelf.py ELF wrapper
 examples/       small programs per feature (also used as tests)
-templates/      numbered walkthroughs 01_hello .. 74_serial (+ .c4asm sidecars)
+templates/      numbered walkthroughs 01_hello .. 75_fatwrite (+ .c4asm sidecars)
 build.zig       build definition (version lives here)
 build.zig.zon   package manifest (version mirrored here)
 DOCS.md         full language + kernel reference
@@ -804,8 +806,9 @@ zip/            local release snapshots (kept out of git; use GitHub releases)
 `44_kmain` → `52_timer` → `54_keyboard` → `55_paging` → `56_syscall` → `58_usermode` →
 `59_sched` → `61_ata` → `62_fat` → `63_vga` → `64_shell` → `65_exec` → `66_vga` for the
 kernel path, then `67_socket` → `68_chat` for TCP and `69_mem` → `70_block` →
-`71_task` for the systems trio, then `72_fat` → `73_lex` → `74_serial` for
-self-reliance (writable disk, self-hosted lexer, serial log). Every kernel
+`71_task` for the systems trio, then `72_fat` → `73_lex` → `74_serial` →
+`75_fatwrite` for self-reliance (writable disk, self-hosted lexer,
+serial log, kernel write path). Every kernel
 template header documents its exact build recipe.
 
 ---
@@ -856,7 +859,15 @@ stays out of git; public releases go through GitHub releases.
   shadowing works, `ex_globals` proves parity); `73_lex` compiles
   natively on top of it. Plus a latent parity fix (`os.read` byte-exact
   on both sides instead of native trailing-newline stripping).
-- After that: fuller shell (save/rm via fat), native tasks, more drivers.
+- **0.4.6 (this):** native tasks — emitter generates a fn registry so
+  `spawn` resolves zero-arg functions, C scheduler with setjmp/longjmp
+  yield + channels + sleep (`ex_task`/`71_task` byte-identical native);
+  plus an emitter soundness fix (`while` with `and`/`or` re-evaluates
+  fully each iteration — stale temps used to freeze loop bounds) and
+  the kernel write path (`outw` builtin, `75_fatwrite` roundtrip+delete
+  proven in QEMU with host re-read, `save`/`rm` in `64_shell` typed
+  live over sendkey).
+- After that: more drivers (rtc, pci, sound), fuller syscalls, parser in C4Plus.
 
 ---
 

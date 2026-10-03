@@ -962,13 +962,27 @@ pub const Emitter = struct {
 
     fn emitWhile(self: *Emitter) !void {
         self.skipSpaces();
+        // Capture the condition's prelude (and/or temps) so it lands
+        // INSIDE the loop: the check re-runs every iteration, so its
+        // temporaries must be recomputed too (0.4.6 fix for stale conds).
+        const mark = self.pre.items.len;
+        var cbuf: std.ArrayList(u8) = .empty;
+        const saved_out = self.out;
+        self.out = &cbuf;
         const cond = try self.emitExprText();
+        self.out = saved_out;
+        const cpre = try self.alloc.dupe(u8, self.pre.items[mark..]);
+        self.pre.shrinkRetainingCapacity(mark);
         self.skipSpaces();
         try self.emitIndent();
-        try self.w("while (c4_truthy(");
-        try self.w(cond);
-        try self.w(")) {\n");
+        try self.w("while (1) {\n");
         self.indent += 1;
+        try self.emitIndent();
+        try self.out.appendSlice(self.alloc, cpre);
+        try self.emitIndent();
+        try self.w("if (!c4_truthy(");
+        try self.w(cond);
+        try self.w(")) break;\n");
         self.loop_depth += 1;
         try self.emitTryLoopPush();
         try self.emitBracedStmts();
@@ -1615,7 +1629,7 @@ pub const Emitter = struct {
         const mod = try self.parseIdent();
         try self.expectEnd();
         if (self.fs) return self.fail("import {s} not in freestanding emit", .{mod});
-        if (std.mem.eql(u8, mod, "os") or std.mem.eql(u8, mod, "physics") or std.mem.eql(u8, mod, "time") or std.mem.eql(u8, mod, "cpu") or std.mem.eql(u8, mod, "heap") or std.mem.eql(u8, mod, "json") or std.mem.eql(u8, mod, "hex") or std.mem.eql(u8, mod, "random") or std.mem.eql(u8, mod, "strings") or std.mem.eql(u8, mod, "csv") or std.mem.eql(u8, mod, "mem") or std.mem.eql(u8, mod, "block") or std.mem.eql(u8, mod, "fat") or std.mem.eql(u8, mod, "args") or std.mem.eql(u8, mod, "path")) {
+        if (std.mem.eql(u8, mod, "os") or std.mem.eql(u8, mod, "physics") or std.mem.eql(u8, mod, "time") or std.mem.eql(u8, mod, "cpu") or std.mem.eql(u8, mod, "heap") or std.mem.eql(u8, mod, "json") or std.mem.eql(u8, mod, "hex") or std.mem.eql(u8, mod, "random") or std.mem.eql(u8, mod, "strings") or std.mem.eql(u8, mod, "csv") or std.mem.eql(u8, mod, "mem") or std.mem.eql(u8, mod, "block") or std.mem.eql(u8, mod, "fat") or std.mem.eql(u8, mod, "args") or std.mem.eql(u8, mod, "path") or std.mem.eql(u8, mod, "task")) {
             try self.mods.put(try self.alloc.dupe(u8, mod), true);
             return;
         }
@@ -1627,9 +1641,6 @@ pub const Emitter = struct {
         }
         if (std.mem.eql(u8, mod, "socket")) {
             return self.fail("'socket' is script-only (network); run it with c4c, not --emit-c", .{});
-        }
-        if (std.mem.eql(u8, mod, "task")) {
-            return self.fail("'task' is script-only (cooperative tasks need shared state); run it with c4c, not --emit-c", .{});
         }
         if (std.mem.eql(u8, mod, "vgatogui")) {
             return self.fail("'vgatogui' is script-only (VGA emulator window); run it with c4c, not --emit-c", .{});
@@ -2083,6 +2094,10 @@ pub const Emitter = struct {
                 if (args.len != 1) return self.fail("inw(port) takes 1 arg", .{});
                 return try std.fmt.allocPrint(self.alloc, "c4_inw({s})", .{args[0]});
             }
+            if (std.mem.eql(u8, name, "outw")) {
+                if (args.len != 2) return self.fail("outw(port, val) takes 2 args", .{});
+                return try std.fmt.allocPrint(self.alloc, "c4_outw({s}, {s})", .{ args[0], args[1] });
+            }
             if (std.mem.eql(u8, name, "serial_init") or std.mem.eql(u8, name, "serial_poll") or std.mem.eql(u8, name, "serial_getc")) {
                 if (args.len != 0) return self.fail("'{s}' takes no args", .{name});
                 return try std.fmt.allocPrint(self.alloc, "c4_{s}()", .{name});
@@ -2234,7 +2249,7 @@ pub const Emitter = struct {
                 return try std.fmt.allocPrint(self.alloc, "c4_flat({s})", .{args[0]});
             }
         } else {
-            const fsonly = [_][]const u8{ "outb", "inb", "inw", "serial_init", "serial_putc", "serial_puts", "serial_poll", "serial_getc", "sti", "cli", "ticks", "irq_addr", "idt_set", "idt_load", "key", "irq1_addr", "poke32", "peek32", "vga_clear", "vga_put", "vga_get", "vga_text", "vga_scroll", "vga_move", "vga_size", "cr3", "pg_on", "kmalloc", "kfree", "syscall", "syscall_addr", "addr", "gdt_set", "gdt_load", "tss", "enter_user", "elf_load", "user_base", "user_len", "user2_base", "user2_len", "fault_addr", "task_create", "tasks", "idle", "flat" };
+            const fsonly = [_][]const u8{ "outb", "inb", "inw", "outw", "serial_init", "serial_putc", "serial_puts", "serial_poll", "serial_getc", "sti", "cli", "ticks", "irq_addr", "idt_set", "idt_load", "key", "irq1_addr", "poke32", "peek32", "vga_clear", "vga_put", "vga_get", "vga_text", "vga_scroll", "vga_move", "vga_size", "cr3", "pg_on", "kmalloc", "kfree", "syscall", "syscall_addr", "addr", "gdt_set", "gdt_load", "tss", "enter_user", "elf_load", "user_base", "user_len", "user2_base", "user2_len", "fault_addr", "task_create", "tasks", "idle", "flat" };
             for (fsonly) |b| {
                 if (std.mem.eql(u8, name, b)) return self.fail("'{s}' is freestanding-only (kernel code via --emit-c --freestanding)", .{name});
             }
@@ -2542,7 +2557,27 @@ pub const Emitter = struct {
             }
             if (cfn == null) return self.fail("unknown path.{s} in emit v1", .{method});
         } else if (std.mem.eql(u8, module, "task")) {
-            return self.fail("'task' is script-only (cooperative tasks need shared state); run it with c4c, not --emit-c", .{});
+            if (!self.mods.contains("task")) return self.fail("'task' used without 'import task'", .{});
+            if (std.mem.eql(u8, method, "run")) {
+                if (args.len == 0) {
+                    return try self.alloc.dupe(u8, "c4_task_run()");
+                } else if (args.len == 1) {
+                    return try std.fmt.allocPrint(self.alloc, "c4_task_run_cap({s})", .{args[0]});
+                }
+                return self.fail("task.run takes 0-1 args", .{});
+            }
+            if (std.mem.eql(u8, method, "step")) {
+                if (args.len != 0) return self.fail("task.step takes 0 args", .{});
+                return try self.alloc.dupe(u8, "c4_task_step_fn()");
+            }
+            const known_task = [_][]const u8{ "spawn", "yield", "exit", "self", "alive", "list", "sleep", "chan", "send", "recv" };
+            for (known_task) |k| {
+                if (std.mem.eql(u8, method, k)) {
+                    cfn = try std.fmt.allocPrint(self.alloc, "c4_task_{s}", .{method});
+                    break;
+                }
+            }
+            if (cfn == null) return self.fail("unknown task.{s} in emit v1", .{method});
         } else if (std.mem.eql(u8, module, "cpu")) {
             if (!self.mods.contains("cpu")) return self.fail("'cpu' used without 'import cpu'", .{});
             const known_cpu = [_][]const u8{ "new", "reg", "setreg", "load", "store", "step", "run" };
@@ -2947,6 +2982,14 @@ pub fn emitProgram(
         try out.appendSlice(alloc, "\n__attribute__((section(\".text.kmain\")))\nvoid kmain(void) {\n");
     } else {
         try out.appendSlice(alloc, "\nint main(int argc, char **argv) {\n    c4_args_init(argc, argv);\n");
+    }
+    if (!freestanding and mods.contains("task")) {
+        try out.appendSlice(alloc, "    /* task fn registry: name, C fn, arity (0.4.6) */\n");
+        for (fn_names.items) |nm| {
+            const fi = fns_table.get(nm).?;
+            const reg = try std.fmt.allocPrint(alloc, "    c4_task_reg(\"{s}\", (C4Val (*)(void))f_{s}, {d});\n", .{ nm, nm, fi.params.len });
+            try out.appendSlice(alloc, reg);
+        }
     }
     try out.appendSlice(alloc, pre_buf.items);
     try out.appendSlice(alloc, main_buf.items);

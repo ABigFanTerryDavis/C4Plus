@@ -7992,7 +7992,7 @@ const JsonParser = struct {
             return Value{ .number = if ((v >> @as(u6, @intCast(n))) & 1 == 1) 1 else 0 };
         }
         if (std.mem.eql(u8, name, "outb") or std.mem.eql(u8, name, "inb") or
-            std.mem.eql(u8, name, "inw") or
+            std.mem.eql(u8, name, "inw") or std.mem.eql(u8, name, "outw") or
             std.mem.eql(u8, name, "serial_init") or std.mem.eql(u8, name, "serial_putc") or
             std.mem.eql(u8, name, "serial_puts") or std.mem.eql(u8, name, "serial_poll") or
             std.mem.eql(u8, name, "serial_getc") or

@@ -1,0 +1,374 @@
+# 75_fatwrite — writable FAT12 in a freestanding C4Plus kernel.
+# Build (same shape as 74_serial, --image-base note there):
+#   c4c --emit-c 75_fatwrite.c4p --freestanding -o fatw.c
+#   gcc -m32 -ffreestanding -nostdlib -c -o fatw.o fatw.c -I rt
+#   gcc -m32 -ffreestanding -nostdlib -c -o fs.o rt/c4rt_fs.c
+#   as --32 rt/irq.s -o irq.o
+#   as --32 boot/boot.s -o boot.o
+#   ld -m i386pe -T boot/linkflat.ld --image-base 0x0 -o fatw.pe fatw.o fs.o irq.o
+#   objcopy -O binary fatw.pe fatw.bin
+#   ld -m i386pe -T boot/bootlink.ld --image-base 0x0 -o boot.pe boot.o
+#   objcopy -O binary -j .boot boot.pe boot.bin
+#   cat boot.bin fatw.bin(pad 96K) fat12.bin > fwdisk.img  (fat base LBA 193)
+#   python user/mkfat.py fat12.bin <hello> <elf>
+#   qemu-system-i386 -drive format=raw,file=fwdisk.img -display none ^
+#     -serial stdio -device isa-debug-exit,iobase=0xf4,iosize=0x04
+# Expect: write/read/delete proofs on the host terminal via COM1,
+# qemu exit = (0<<1)|1. The volume stays modified — read it back from
+# the host with the fat module to prove it persisted.
+# Root directory only, timestamps zeroed, names are 11 raw 8.3 bytes
+# (same layout user/mkfat.py builds and 62_fat reads).
+
+fn ata_wait() {
+  let t = 0
+  while t < 100000 {
+    let s = inb(503)
+    if (s & 128) == 0 {
+      return s
+    }
+    t = t + 1
+  }
+  fail("ata timeout")
+}
+
+fn ata_read(lba) {
+  outb(502, 224 + (lba >> 24))
+  outb(498, 1)
+  outb(499, lba & 255)
+  outb(500, (lba >> 8) & 255)
+  outb(501, (lba >> 16) & 255)
+  outb(503, 32)
+  ata_wait()
+  let t = 0
+  while t < 100000 {
+    let s = inb(503)
+    if s & 1 {
+      fail("ata err")
+    }
+    if s & 8 {
+      break
+    }
+    t = t + 1
+  }
+  let buf = bytes(512)
+  let w = 0
+  while w < 256 {
+    let v = inw(496)
+    poke(buf, w * 2, v & 255)
+    poke(buf, w * 2 + 1, (v >> 8) & 255)
+    w = w + 1
+  }
+  return buf
+}
+
+fn ata_write(lba, buf) {
+  outb(502, 224 + (lba >> 24))
+  outb(498, 1)
+  outb(499, lba & 255)
+  outb(500, (lba >> 8) & 255)
+  outb(501, (lba >> 16) & 255)
+  outb(503, 48)
+  ata_wait()
+  let t = 0
+  while t < 100000 {
+    let s = inb(503)
+    if s & 1 {
+      fail("ata err")
+    }
+    if s & 8 {
+      break
+    }
+    t = t + 1
+  }
+  let w = 0
+  while w < 256 {
+    outw(496, peek(buf, w * 2) + peek(buf, w * 2 + 1) * 256)
+    w = w + 1
+  }
+  let t2 = 0
+  while t2 < 100000 {
+    let s2 = inb(503)
+    if s2 & 1 {
+      fail("ata err")
+    }
+    if (s2 & 128) == 0 {
+      return 1
+    }
+    t2 = t2 + 1
+  }
+  fail("ata write timeout")
+}
+
+fn rd16(buf, off) {
+  return peek(buf, off) + peek(buf, off + 1) * 256
+}
+
+fn wr16(buf, off, v) {
+  poke(buf, off, v & 255)
+  poke(buf, off + 1, (v >> 8) & 255)
+}
+
+fn wr32(buf, off, v) {
+  poke(buf, off, v & 255)
+  poke(buf, off + 1, (v >> 8) & 255)
+  poke(buf, off + 2, (v >> 16) & 255)
+  poke(buf, off + 3, (v >> 24) & 255)
+}
+
+fn fat12(fat, cl) {
+  let off = cl + floor(cl / 2)
+  if cl % 2 == 0 {
+    return peek(fat, off) + (peek(fat, off + 1) & 15) * 256
+  }
+  return (peek(fat, off) >> 4) + peek(fat, off + 1) * 16
+}
+
+fn fat12set(fat, cl, val) {
+  let off = cl + floor(cl / 2)
+  if cl % 2 == 0 {
+    poke(fat, off, val & 255)
+    poke(fat, off + 1, (peek(fat, off + 1) & 240) + ((val >> 8) & 15))
+  } else {
+    poke(fat, off, (peek(fat, off) & 15) + ((val * 16) & 240))
+    poke(fat, off + 1, (val >> 4) & 255)
+  }
+}
+
+let BASE = 193
+
+fn fat_secs(base, buf512, off) {
+  let s = 0
+  while s < 512 {
+    poke(buf512, off + s, peek(base, s))
+    s = s + 1
+  }
+}
+
+fn fat_write(name83, data, size) {
+  let root = ata_read(BASE + 5)
+  let fat = bytes(1024)
+  fat_secs(ata_read(BASE + 1), fat, 0)
+  fat_secs(ata_read(BASE + 2), fat, 512)
+  let slot = -1
+  let e = 0
+  while e < 16 {
+    let b0 = peek(root, e * 32)
+    if b0 == 0 {
+      if slot == -1 {
+        slot = e
+      }
+      break
+    }
+    if b0 == 229 {
+      if slot == -1 {
+        slot = e
+      }
+    } else {
+      let match = 1
+      let k = 0
+      while k < 11 {
+        if peek(root, e * 32 + k) != ord(substr(name83, k, 1)) {
+          match = 0
+        }
+        k = k + 1
+      }
+      if match {
+        slot = e
+        let oldcl = rd16(root, e * 32 + 26)
+        if oldcl != 0 {
+          let c = oldcl
+          while c >= 2 and c < 4088 {
+            let nx = fat12(fat, c)
+            fat12set(fat, c, 0)
+            if nx >= 4088 {
+              break
+            }
+            c = nx
+          }
+        }
+        break
+      }
+    }
+    e = e + 1
+  }
+  if slot == -1 {
+    serial_puts("dir full\n")
+    exit(2)
+  }
+  let need = floor((size + 511) / 512)
+  let chain = bytes(need * 2)
+  let got = 0
+  let c = 2
+  while got < need and c < 508 {
+    if fat12(fat, c) == 0 {
+      wr16(chain, got * 2, c)
+      got = got + 1
+    }
+    c = c + 1
+  }
+  if got < need {
+    serial_puts("no space\n")
+    exit(3)
+  }
+  let k = 0
+  while k < need {
+    let nx = 4095
+    if k + 1 < need {
+      nx = rd16(chain, (k + 1) * 2)
+    }
+    fat12set(fat, rd16(chain, k * 2), nx)
+    let sec = bytes(512)
+    let b = 0
+    while b < 512 {
+      let src = k * 512 + b
+      if src < size {
+        poke(sec, b, peek(data, src))
+      }
+      b = b + 1
+    }
+    ata_write(BASE + 4 + rd16(chain, k * 2), sec)
+    k = k + 1
+  }
+  let fat1 = bytes(512)
+  let f = 0
+  while f < 512 {
+    poke(fat1, f, peek(fat, 512 + f))
+    f = f + 1
+  }
+  ata_write(BASE + 1, fat)
+  ata_write(BASE + 2, fat1)
+  ata_write(BASE + 3, fat)
+  ata_write(BASE + 4, fat1)
+  let eo = slot * 32
+  let j = 0
+  while j < 11 {
+    poke(root, eo + j, ord(substr(name83, j, 1)))
+    j = j + 1
+  }
+  poke(root, eo + 11, 32)
+  wr16(root, eo + 26, rd16(chain, 0))
+  wr32(root, eo + 28, size)
+  ata_write(BASE + 5, root)
+  return need
+}
+
+fn fat_readback(name83, size) {
+  let root = ata_read(BASE + 5)
+  let fat = bytes(1024)
+  fat_secs(ata_read(BASE + 1), fat, 0)
+  fat_secs(ata_read(BASE + 2), fat, 512)
+  let e = 0
+  while e < 16 {
+    if peek(root, e * 32) == 0 {
+      break
+    }
+    let match = 1
+    let k = 0
+    while k < 11 {
+      if peek(root, e * 32 + k) != ord(substr(name83, k, 1)) {
+        match = 0
+      }
+      k = k + 1
+    }
+    if match {
+      let cl = rd16(root, e * 32 + 26)
+      let out = bytes(size)
+      let pos = 0
+      while cl >= 2 and cl < 4088 {
+        let sec = ata_read(BASE + 4 + cl)
+        let b = 0
+        while b < 512 {
+          if pos < size {
+            poke(out, pos, peek(sec, b))
+            pos = pos + 1
+          }
+          b = b + 1
+        }
+        cl = fat12(fat, cl)
+      }
+      return out
+    }
+    e = e + 1
+  }
+  serial_puts("not found\n")
+  exit(4)
+}
+
+serial_init()
+serial_puts("c4plus fatwrite alive\n")
+let payload = bytes(600)
+let i = 0
+while i < 600 {
+  poke(payload, i, 65 + (i % 26))
+  i = i + 1
+}
+let ncl = fat_write("WROTE   TXT", payload, 600)
+serial_puts("clusters=")
+serial_putc(48 + ncl)
+serial_puts("\n")
+let back = fat_readback("WROTE   TXT", 600)
+let ok = 1
+let j = 0
+while j < 600 {
+  if peek(back, j) != peek(payload, j) {
+    ok = 0
+  }
+  j = j + 1
+}
+if ok {
+  serial_puts("roundtrip ok\n")
+} else {
+  serial_puts("roundtrip BAD\n")
+  exit(5)
+}
+let root2 = ata_read(BASE + 5)
+let fat2 = bytes(1024)
+fat_secs(ata_read(BASE + 1), fat2, 0)
+fat_secs(ata_read(BASE + 2), fat2, 512)
+let e2 = 0
+while e2 < 16 {
+  if peek(root2, e2 * 32) == 0 {
+    break
+  }
+  let match2 = 1
+  let k2 = 0
+  while k2 < 11 {
+    if peek(root2, e2 * 32 + k2) != ord(substr("WROTE   TXT", k2, 1)) {
+      match2 = 0
+    }
+    k2 = k2 + 1
+  }
+  if match2 {
+    let c = rd16(root2, e2 * 32 + 26)
+    while c >= 2 and c < 4088 {
+      let nx = fat12(fat2, c)
+      fat12set(fat2, c, 0)
+      if nx >= 4088 {
+        break
+      }
+      c = nx
+    }
+    poke(root2, e2 * 32, 229)
+    let fd = bytes(512)
+    let fi = 0
+    while fi < 512 {
+      poke(fd, fi, peek(fat2, fi))
+      fi = fi + 1
+    }
+    let fe = bytes(512)
+    let fj = 0
+    while fj < 512 {
+      poke(fe, fj, peek(fat2, 512 + fj))
+      fj = fj + 1
+    }
+    ata_write(BASE + 1, fd)
+    ata_write(BASE + 3, fd)
+    ata_write(BASE + 2, fe)
+    ata_write(BASE + 4, fe)
+    ata_write(BASE + 5, root2)
+    serial_puts("delete ok\n")
+    break
+  }
+  e2 = e2 + 1
+}
+exit(0)

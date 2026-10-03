@@ -543,6 +543,10 @@ C4Val c4_inw(C4Val port) {
     __asm__ volatile("inw %1, %0" : "=a"(v) : "Nd"((unsigned short)c4_tonum(port)));
     return c4_num((double)v);
 }
+C4Val c4_outw(C4Val port, C4Val val) {
+    __asm__ volatile("outw %0, %1" ::"a"((unsigned short)c4_tonum(val)), "Nd"((unsigned short)c4_tonum(port)));
+    return c4_nil();
+}
 /* ---- 0.4.3: COM1 serial log (16550 UART at 0x3F8, 115200 8N1).
  * The kernel's printf-independent log channel: QEMU `-serial stdio`
  * shows everything written here on the host terminal. ---- */

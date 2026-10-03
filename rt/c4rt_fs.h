@@ -115,6 +115,7 @@ void c4_dict_put(C4Val d, const char *k, C4Val v);
 C4Val c4_outb(C4Val port, C4Val val);
 C4Val c4_inb(C4Val port);
 C4Val c4_inw(C4Val port);
+C4Val c4_outw(C4Val port, C4Val val);
 C4Val c4_serial_init(void);
 C4Val c4_serial_putc(C4Val ch);
 C4Val c4_serial_puts(C4Val s);

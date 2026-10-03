@@ -1,4 +1,4 @@
-# C4Plus — Complete Docs (v0.4.5)
+# C4Plus — Complete Docs (v0.4.6)
 
 C4Plus (`.c4p`) is a small scripting language with headers (`.c4h`),
 assembly sidecars (`.c4asm`), batch files (`.c4bht`), projects
@@ -374,7 +374,7 @@ block.flush(d)
 block.close(d)
 # out of range is catchable with try/catch
 
-import task                # cooperative tasks, script-only like socket
+import task                # cooperative tasks (compiles to native too)
 task.spawn("worker")       # named zero-arg fn -> id (unknown fn catchable)
 task.yield()               # hand control back; fn restarts next step
 task.exit()                # kill current task (returning ends it too)
@@ -599,6 +599,11 @@ run in source order at the top of `main`. See
 `examples/ex_globals.c4p` — and `templates/73_lex.c4p`, whose keyword
 tables are globals, which is why it compiles natively now.
 
+`while` conditions with `and`/`or` re-evaluate fully every iteration
+(0.4.6 fix: the operand temporaries used to freeze after the first
+check, hanging or corrupting loops whose bounds move — e.g. an
+allocator scan that never saw freed clusters).
+
 **Script-only features** (clean error in emit v1, use interpreter
 or native-mode for these):
 
@@ -608,9 +613,6 @@ or native-mode for these):
 * `vgatogui` (VGA emulator window — script-only; `import vga` works in
   scripts with a window open, kernels use bare `vga_*` builtins)
 * `socket` (TCP — script-only)
-* `task` (cooperative tasks — script-only: task bodies are function
-  values, which `--emit-c` cannot pass around; shared state itself
-  compiles fine since 0.4.5)
 * closures capturing locals (top-level function values compile and
   call fine; only captured-variable capture stays script-side; since
   0.4.5 a function CAN read and assign file-scope globals — see
@@ -668,8 +670,8 @@ compiles to native too, `examples/ex_csv.c4p`). Cooperative tasks
 (`71_task`, `examples/ex_task.c4p`: `spawn/yield/exit/sleep` over named
 functions run as steps, `chan/send/recv` channels, `run/step` scheduler,
 `self/alive/list`; protothread-style — locals do not survive yield, no
-mutexes since steps never preempt; script-only because task bodies are
-function values, which `--emit-c` cannot pass around). Memory allocators (`69_mem`, `examples/ex_mem.c4p`:
+mutexes since steps never preempt; native via a generated fn registry
+plus setjmp/longjmp scheduler since 0.4.6). Memory allocators (`69_mem`, `examples/ex_mem.c4p`:
 `arena/pool/alloc/acquire/release`, typed `read/write_u8/u16/u32`,
 `fill/copy/usage/reset`, compiles to native). Block storage (`70_block`,
 `examples/ex_block.c4p`: `ramdisk/file/read/write/read_text/write_text/
@@ -682,7 +684,13 @@ compiles to native). Self-hosted shadow lexer (`73_lex`, verified
 token-identical to `c4c lex` over the whole corpus by `zig-out/lexdiff.py`:
 `keyword/ident/number/string/op/comment/nl/error` rows, unary-minus
 lookbehind, `..` maximal munch). COM1 serial log for kernels
-(`74_serial`, verified live under QEMU `-serial stdio`).
+(`74_serial`, verified live under QEMU `-serial stdio`). Kernel-side
+FAT write (`75_fatwrite`: ATA PIO sector write via new `outw` builtin,
+chain alloc/free, dir update, serial-proofed roundtrip + delete in
+QEMU with host re-read afterwards); the interactive shell learned
+`save`/`rm` on the same code (`64_shell`, typed live over QEMU monitor
+sendkey in 0.4.6 — note the shell recipe needs `-Os` now, since the
+write path pushes the kernel past 96K at `-O0`).
 
 Freestanding extras for kernel code (`--emit-c --freestanding`
 only — clean errors elsewhere): `outb(port, val)`, `inb(port)`, `inw(port)` (16-bit),
@@ -690,6 +698,8 @@ only — clean errors elsewhere): `outb(port, val)`, `inb(port)`, `inw(port)` (1
 `key()` (PS/2 scancode driver: next char code, or -1 if empty),
 `irq_addr()` / `irq1_addr()` (addresses of the IRQ stubs in
 `rt/irq.s`), `idt_set(vec, off, sel, attr)`, `idt_load()`.
+`inw(port)` reads 16 bits; `outw(port, val)` writes 16 bits (the ATA
+write path, `75_fatwrite`).
 `serial_init()`, `serial_putc(c)`, `serial_puts(s)`, `serial_poll()`
 (1/0), `serial_getc()` (byte or -1) — COM1 16550 at `0x3F8`, 115200 8N1,
 the kernel log channel (`74_serial`, QEMU `-serial stdio`).
