@@ -1449,7 +1449,8 @@ void c4_exit(C4Val code) {
 }
 
 static char *c4_read_all(const char *path, size_t *out_n, int binary) {
-    FILE *f = fopen(path, binary ? "rb" : "r");
+    (void)binary;
+    FILE *f = fopen(path, "rb");
     if (!f)
         return NULL;
     size_t cap = 4096, len = 0;
@@ -1463,10 +1464,6 @@ static char *c4_read_all(const char *path, size_t *out_n, int binary) {
         }
     }
     fclose(f);
-    if (!binary) {
-        while (len > 0 && (o[len - 1] == '\n' || o[len - 1] == '\r'))
-            len--;
-    }
     *out_n = len;
     return o;
 }

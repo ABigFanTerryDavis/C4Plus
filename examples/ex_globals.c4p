@@ -1,0 +1,23 @@
+# globals: top-level lets are visible inside functions, mutable across
+# calls, rebindable, and shadowable — identically interpreted and native.
+# (Native: hoisted to file-scope C globals since 0.4.5.)
+fn readlog() {
+  return log
+}
+fn addlog(x) {
+  log = log + [x]
+  return len(log)
+}
+let log = ["boot"]
+print readlog()
+print addlog("net")
+print addlog("fs")
+print readlog()
+let log = ["reset"]
+print readlog()
+fn shadow() {
+  let log = ["inner"]
+  return log
+}
+print shadow()
+print readlog()

@@ -39,6 +39,9 @@ pub const Emitter = struct {
     fn_ids: *std.StringHashMap(usize),
     valnames: *std.StringHashMap(bool),
     fs: bool = false,
+    blk: usize = 0,
+    globals: *std.ArrayList(u8),
+    gseen: *std.StringHashMap(bool),
 
     fn w(self: *Emitter, s: []const u8) !void {
         try self.out.appendSlice(self.alloc, s);
@@ -82,6 +85,9 @@ pub const Emitter = struct {
             .loop_try_len = self.loop_try_len,
             .fn_ids = self.fn_ids,
             .valnames = self.valnames,
+            .blk = self.blk,
+            .globals = self.globals,
+            .gseen = self.gseen,
         };
     }
 
@@ -290,6 +296,9 @@ pub const Emitter = struct {
             .loop_try_len = self.loop_try_len,
             .fn_ids = self.fn_ids,
             .valnames = self.valnames,
+            .blk = self.blk,
+            .globals = self.globals,
+            .gseen = self.gseen,
         };
         try sub.run();
         self.tmpc = sub.tmpc;
@@ -344,8 +353,21 @@ pub const Emitter = struct {
             const e = try self.emitExprText();
             try self.expectEnd();
             try self.emitIndent();
-            try self.w("C4Val ");
-            try self.w(try cname("v_", name, self.alloc));
+            if (self.fn_depth == 0 and self.blk == 0) {
+                // direct top level: file-scope global (declared once
+                // in head, assigned here in order). Re-let reassigns,
+                // matching the interpreter (old emit errored here).
+                if (self.gseen.get(name) == null) {
+                    try self.gseen.put(try self.alloc.dupe(u8, name), true);
+                    try self.globals.appendSlice(self.alloc, "static C4Val ");
+                    try self.globals.appendSlice(self.alloc, try cname("v_", name, self.alloc));
+                    try self.globals.appendSlice(self.alloc, ";\n");
+                }
+                try self.w(try cname("v_", name, self.alloc));
+            } else {
+                try self.w("C4Val ");
+                try self.w(try cname("v_", name, self.alloc));
+            }
             try self.w(" = ");
             try self.w(e);
             try self.w(";\n");
@@ -863,6 +885,8 @@ pub const Emitter = struct {
         const body = try self.captureBody();
         const bl = self.line;
         self.indent += 1;
+        self.blk += 1;
+        defer self.blk -= 1;
         try self.emitBodySrc(body, bl);
         self.indent -= 1;
     }
@@ -1577,13 +1601,16 @@ pub const Emitter = struct {
                 .fs = self.fs,
                 .tmpc = self.tmpc,
                 .indent = self.indent,
-                .fn_ids = self.fn_ids,
-                .valnames = self.valnames,
-            };
-            try sub.run();
-            self.indent = sub.indent;
-            self.tmpc = sub.tmpc;
-            return;
+            .fn_ids = self.fn_ids,
+            .valnames = self.valnames,
+            .blk = self.blk,
+            .globals = self.globals,
+            .gseen = self.gseen,
+        };
+        try sub.run();
+        self.indent = sub.indent;
+        self.tmpc = sub.tmpc;
+        return;
         }
         const mod = try self.parseIdent();
         try self.expectEnd();
@@ -2821,6 +2848,8 @@ pub fn emitProgram(
         try fn_ids.put(nm, i);
     }
     var top_vals = std.StringHashMap(bool).init(alloc);
+    var globals_buf: std.ArrayList(u8) = .empty;
+    var gseen = std.StringHashMap(bool).init(alloc);
     var em = Emitter{
         .src = source,
         .alloc = alloc,
@@ -2838,6 +2867,8 @@ pub fn emitProgram(
         .fs = freestanding,
         .fn_ids = &fn_ids,
         .valnames = &top_vals,
+        .globals = &globals_buf,
+        .gseen = &gseen,
     };
     var head: std.ArrayList(u8) = .empty;
     if (freestanding) {
@@ -2906,6 +2937,11 @@ pub fn emitProgram(
     };
     try out.appendSlice(alloc, head.items);
     try out.appendSlice(alloc, "\n");
+    if (globals_buf.items.len > 0) {
+        try out.appendSlice(alloc, "/* hoisted top-level globals (0.4.5) */\n");
+        try out.appendSlice(alloc, globals_buf.items);
+        try out.appendSlice(alloc, "\n");
+    }
     try out.appendSlice(alloc, fns_buf.items);
     if (freestanding) {
         try out.appendSlice(alloc, "\n__attribute__((section(\".text.kmain\")))\nvoid kmain(void) {\n");

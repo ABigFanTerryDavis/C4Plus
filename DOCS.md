@@ -1,4 +1,4 @@
-# C4Plus — Complete Docs (v0.4.4)
+# C4Plus — Complete Docs (v0.4.5)
 
 C4Plus (`.c4p`) is a small scripting language with headers (`.c4h`),
 assembly sidecars (`.c4asm`), batch files (`.c4bht`), projects
@@ -233,7 +233,8 @@ Bits & bytes: `& | ^ ~ << >>` (64-bit ints, C-like precedence),
 ```c4p
 import os
 os.create("f.txt", "hi")   # -> 1
-os.read("f.txt")           # whole file as string
+os.read("f.txt")           # whole file as string, bytes exact (native
+                           # and script agree since 0.4.5; no stripping)
 os.append("f.txt", "!")    # creates if missing
 os.exists("f.txt")         # 1/0
 os.remove("f.txt")         # errors if missing
@@ -385,7 +386,8 @@ task.run()                 # steps until no task alive (run(n) caps steps)
 task.step()                # one round over live tasks -> steps run
 task.self()                # current id, -1 outside; alive(id), list()
 # protothread style: locals do not survive yield, keep state in globals.
-# no mutexes needed: a step never preempts another step.
+# no mutexes needed: a step never preempts another step. script-only:
+# task bodies are function values, which --emit-c cannot pass around.
 
 import fat                 # writable FAT12 on block devices (native too)
 let v = block.ramdisk(512)
@@ -589,6 +591,14 @@ c4c --emit-c prog.c4p -o prog.c
 gcc -std=c99 -I rt -o prog prog.c rt/c4rt.c -lm
 ```
 
+Top-level `let` becomes a file-scope C global (since 0.4.5): functions
+can read and assign it, rebinding with a second `let` reassigns (same
+as the interpreter — old emit errored here), and a `let` inside a
+function or a braced block stays a local that shadows. Initializers
+run in source order at the top of `main`. See
+`examples/ex_globals.c4p` — and `templates/73_lex.c4p`, whose keyword
+tables are globals, which is why it compiles natively now.
+
 **Script-only features** (clean error in emit v1, use interpreter
 or native-mode for these):
 
@@ -598,10 +608,13 @@ or native-mode for these):
 * `vgatogui` (VGA emulator window — script-only; `import vga` works in
   scripts with a window open, kernels use bare `vga_*` builtins)
 * `socket` (TCP — script-only)
-* `task` (cooperative tasks — script-only: task bodies need shared
-  state, and emitted functions cannot see globals)
+* `task` (cooperative tasks — script-only: task bodies are function
+  values, which `--emit-c` cannot pass around; shared state itself
+  compiles fine since 0.4.5)
 * closures capturing locals (top-level function values compile and
-  call fine; only captured-variable capture stays script-side)
+  call fine; only captured-variable capture stays script-side; since
+  0.4.5 a function CAN read and assign file-scope globals — see
+  `examples/ex_globals.c4p`)
 * `#target sim` needs the `cpu` module... no wait, `cpu` compiles.
   `#target x86-64` asm blocks still compile.
 
@@ -655,8 +668,8 @@ compiles to native too, `examples/ex_csv.c4p`). Cooperative tasks
 (`71_task`, `examples/ex_task.c4p`: `spawn/yield/exit/sleep` over named
 functions run as steps, `chan/send/recv` channels, `run/step` scheduler,
 `self/alive/list`; protothread-style — locals do not survive yield, no
-mutexes since steps never preempt; script-only because emitted functions
-cannot see globals). Memory allocators (`69_mem`, `examples/ex_mem.c4p`:
+mutexes since steps never preempt; script-only because task bodies are
+function values, which `--emit-c` cannot pass around). Memory allocators (`69_mem`, `examples/ex_mem.c4p`:
 `arena/pool/alloc/acquire/release`, typed `read/write_u8/u16/u32`,
 `fill/copy/usage/reset`, compiles to native). Block storage (`70_block`,
 `examples/ex_block.c4p`: `ramdisk/file/read/write/read_text/write_text/

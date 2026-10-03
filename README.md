@@ -848,10 +848,15 @@ stays out of git; public releases go through GitHub releases.
   freestanding builtins (COM1 log channel, `74_serial`, QEMU-verified).
   Plus a toolchain-drift fix documented in DOCS QEMU notes (current MinGW
   `ld` needs `--image-base 0x0` with the kernel linker scripts).
-- **0.4.4 (this):** small patch, two utility modules — `args` (`flag/opt/
+- **0.4.4:** small patch, two utility modules — `args` (`flag/opt/
   rest`, `--x`/`--x=v`/`--` forms, native-compiled) and `path` (`join/
   split/dir/base/ext/stem/isabs/norm/short/is83`, native-compiled).
-- After that: writable filesystem, more drivers, fuller shell.
+- **0.4.5 (this):** emitter globals — top-level `let` hoists to a
+  file-scope C global (functions read/assign it, rebinding reassigns,
+  shadowing works, `ex_globals` proves parity); `73_lex` compiles
+  natively on top of it. Plus a latent parity fix (`os.read` byte-exact
+  on both sides instead of native trailing-newline stripping).
+- After that: fuller shell (save/rm via fat), native tasks, more drivers.
 
 ---
 

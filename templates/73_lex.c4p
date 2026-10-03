@@ -7,8 +7,8 @@
 # `..` is one op; `.` + digit starts a number; `#` and `//` run to newline.
 # Run: c4c 73_lex.c4p <file.c4p> — must match `c4c lex <file.c4p>` exactly.
 # (Corpus differential lives in zig-out/lexdiff.py.)
-# Interpreted only: the keyword/operator tables are globals, which
-# --emit-c cannot see (same wall as task bodies); hence no native build.
+# Compiles natively since 0.4.5 (keyword/operator tables hoist to C
+# globals); the corpus suite covers the interpreted path.
 #
 # Coding discipline (interpreter warts): if/elif/while conditions evaluate
 # more than once, and and/or evaluate both sides, so NOTHING pos-dependent
