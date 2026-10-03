@@ -1,0 +1,10 @@
+# args basics: flags, options with defaults, positionals (run with args to
+# see them fill in; empty run is deterministic too). NOTE: rest() is a
+# pure function of argv — an opt() value that doesn't start with a dash
+# still shows up in rest(). Use `--` to force the rest positional.
+import args
+print ("verbose=" + str(args.flag("verbose")))
+print ("out=" + args.opt("out", "a.bin"))
+print ("jobs=" + args.opt("jobs", "1"))
+print ("rest=" + str(args.rest()))
+try { args.flag(5) } catch e { print ("caught: " + e) }

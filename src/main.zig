@@ -671,6 +671,8 @@ fn replMain(io: Io, arena: std.mem.Allocator, envmap: ?*const std.process.Enviro
         sub.imported_block = repl_block;
         sub.imported_task = repl_task;
         sub.imported_fat = repl_fat;
+        sub.imported_args = repl_args;
+        sub.imported_path = repl_path;
         sub.imported_http = repl_http;
         sub.http_redirects = repl_http_redir;
         sub.imported_vga = repl_vga;
@@ -711,6 +713,8 @@ fn replMain(io: Io, arena: std.mem.Allocator, envmap: ?*const std.process.Enviro
         repl_block = sub.imported_block;
         repl_task = sub.imported_task;
         repl_fat = sub.imported_fat;
+        repl_args = sub.imported_args;
+        repl_path = sub.imported_path;
         repl_http = sub.imported_http;
         repl_http_redir = sub.http_redirects;
         repl_vga = sub.imported_vga;
@@ -736,6 +740,8 @@ var repl_mem: bool = false;
 var repl_block: bool = false;
 var repl_task: bool = false;
 var repl_fat: bool = false;
+var repl_args: bool = false;
+var repl_path: bool = false;
 
 var task_table: [32]Parser.TaskEntry = [_]Parser.TaskEntry{.{}} ** 32;
 var chan_table: [16]Parser.ChanEntry = [_]Parser.ChanEntry{.{}} ** 16;
@@ -1651,6 +1657,8 @@ const Parser = struct {
     imported_block: bool = false,
     imported_task: bool = false,
     imported_fat: bool = false,
+    imported_args: bool = false,
+    imported_path: bool = false,
     imported_http: bool = false,
     imported_vga: bool = false,
     imported_vgatogui: bool = false,
@@ -1736,6 +1744,8 @@ const Parser = struct {
             .imported_block = self.imported_block,
             .imported_task = self.imported_task,
             .imported_fat = self.imported_fat,
+            .imported_args = self.imported_args,
+            .imported_path = self.imported_path,
             .imported_http = self.imported_http,
             .imported_vga = self.imported_vga,
             .imported_vgatogui = self.imported_vgatogui,
@@ -1794,6 +1804,8 @@ const Parser = struct {
             .imported_block = self.imported_block,
             .imported_task = self.imported_task,
             .imported_fat = self.imported_fat,
+            .imported_args = self.imported_args,
+            .imported_path = self.imported_path,
             .imported_http = self.imported_http,
             .imported_vga = self.imported_vga,
             .imported_vgatogui = self.imported_vgatogui,
@@ -1971,12 +1983,16 @@ const Parser = struct {
                     self.imported_task = true;
                 } else if (std.mem.eql(u8, mod, "fat")) {
                     self.imported_fat = true;
+                } else if (std.mem.eql(u8, mod, "args")) {
+                    self.imported_args = true;
+                } else if (std.mem.eql(u8, mod, "path")) {
+                    self.imported_path = true;
                 } else if (std.mem.eql(u8, mod, "vga")) {
                     self.imported_vga = true;
                 } else if (std.mem.eql(u8, mod, "vgatogui")) {
                     self.imported_vgatogui = true;
                 } else {
-                    if (!self.mute)                     std.debug.print("{s}:{d}: unknown module '{s}' (only 'os'/'physics'/'json'/'time'/'heap'/'cpu'/'hex'/'random'/'strings'/'gui'/'http'/'vga'/'vgatogui'/'csv'/'socket'/'mem'/'block'/'task'/'fat' or \"file.c4h\")\n", .{ self.file, self.line, mod });
+                    if (!self.mute)                     std.debug.print("{s}:{d}: unknown module '{s}' (only 'os'/'physics'/'json'/'time'/'heap'/'cpu'/'hex'/'random'/'strings'/'gui'/'http'/'vga'/'vgatogui'/'csv'/'socket'/'mem'/'block'/'task'/'fat'/'args'/'path' or \"file.c4h\")\n", .{ self.file, self.line, mod });
                     return ParseError.UnknownKeyword;
                 }
             }
@@ -2744,6 +2760,8 @@ const Parser = struct {
             .imported_block = self.imported_block,
             .imported_task = self.imported_task,
             .imported_fat = self.imported_fat,
+            .imported_args = self.imported_args,
+            .imported_path = self.imported_path,
             .imported_http = self.imported_http,
             .imported_vga = self.imported_vga,
             .imported_vgatogui = self.imported_vgatogui,
@@ -2789,6 +2807,8 @@ const Parser = struct {
         if (sub.imported_block) self.imported_block = sub.imported_block or self.imported_block;
         if (sub.imported_task) self.imported_task = sub.imported_task or self.imported_task;
         if (sub.imported_fat) self.imported_fat = sub.imported_fat or self.imported_fat;
+        if (sub.imported_args) self.imported_args = sub.imported_args or self.imported_args;
+        if (sub.imported_path) self.imported_path = sub.imported_path or self.imported_path;
         if (sub.imported_http) self.imported_http = sub.imported_http or self.imported_http;
         if (sub.imported_vga) self.imported_vga = sub.imported_vga or self.imported_vga;
         if (sub.imported_vgatogui) self.imported_vgatogui = sub.imported_vgatogui or self.imported_vgatogui;
@@ -2924,6 +2944,8 @@ const Parser = struct {
             .imported_block = self.imported_block,
             .imported_task = self.imported_task,
             .imported_fat = self.imported_fat,
+            .imported_args = self.imported_args,
+            .imported_path = self.imported_path,
             .imported_http = self.imported_http,
             .imported_vga = self.imported_vga,
             .imported_vgatogui = self.imported_vgatogui,
@@ -3933,6 +3955,225 @@ const Parser = struct {
         return ParseError.UnknownFunction;
     }
 
+    fn argName(s: []const u8) []const u8 {
+        var i: usize = 0;
+        while (i < s.len and s[i] == '-') : (i += 1) {}
+        return s[i..];
+    }
+
+    fn callArgsMethod(self: *Parser, method: []const u8, arg_vals: []const Value) anyerror!Value {
+        if (!self.imported_args) {
+            if (!self.mute) std.debug.print("error on line {d}: 'args' used without 'import args'\n", .{self.line});
+            return ParseError.UnknownKeyword;
+        }
+        const argv = self.cli_args.items.items;
+        if (std.mem.eql(u8, method, "flag")) {
+            if (arg_vals.len != 1 or arg_vals[0] != .string) return ParseError.TypeError;
+            const want = Parser.argName(arg_vals[0].string);
+            for (argv) |v| {
+                if (v != .string) continue;
+                const s = v.string;
+                if (s.len >= 2 and s[0] == '-' and std.mem.eql(u8, Parser.argName(s), want)) return Value{ .number = 1 };
+            }
+            return Value{ .number = 0 };
+        }
+        if (std.mem.eql(u8, method, "opt")) {
+            if (arg_vals.len != 2 or arg_vals[0] != .string) return ParseError.TypeError;
+            const want = Parser.argName(arg_vals[0].string);
+            var found: ?Value = null;
+            var i: usize = 0;
+            while (i < argv.len) : (i += 1) {
+                const v = argv[i];
+                if (v != .string or v.string.len < 2 or v.string[0] != '-') continue;
+                const nm = Parser.argName(v.string);
+                if (std.mem.indexOfScalar(u8, nm, '=')) |eq| {
+                    if (std.mem.eql(u8, nm[0..eq], want)) {
+                        found = Value{ .string = nm[eq + 1 ..] };
+                    }
+                    continue;
+                }
+                if (std.mem.eql(u8, nm, want)) {
+                    if (i + 1 < argv.len and argv[i + 1] == .string) {
+                        found = argv[i + 1];
+                        i += 1;
+                    }
+                }
+            }
+            return found orelse arg_vals[1];
+        }
+        if (std.mem.eql(u8, method, "rest")) {
+            if (arg_vals.len != 0) return ParseError.TypeError;
+            const out = try self.alloc.create(ListObj);
+            out.* = .{ .items = .empty };
+            var closed = false;
+            for (argv) |v| {
+                if (v != .string) continue;
+                const s = v.string;
+                if (std.mem.eql(u8, s, "--")) {
+                    closed = true;
+                    continue;
+                }
+                if (!closed and s.len >= 2 and s[0] == '-') continue;
+                try out.items.append(self.alloc, v);
+            }
+            return Value{ .list = out };
+        }
+        if (!self.mute) std.debug.print("error on line {d}: unknown args.{s} (have flag/opt/rest)\n", .{ self.line, method });
+        return ParseError.UnknownFunction;
+    }
+
+    fn callPathMethod(self: *Parser, method: []const u8, arg_vals: []const Value) anyerror!Value {
+        if (!self.imported_path) {
+            if (!self.mute) std.debug.print("error on line {d}: 'path' used without 'import path'\n", .{self.line});
+            return ParseError.UnknownKeyword;
+        }
+        if (std.mem.eql(u8, method, "join")) {
+            if (arg_vals.len != 1 or arg_vals[0] != .list) return ParseError.TypeError;
+            var buf: std.ArrayList(u8) = .empty;
+            var first = true;
+            for (arg_vals[0].list.items.items) |v| {
+                if (v != .string) return ParseError.TypeError;
+                if (v.string.len == 0) continue;
+                if (!first) try buf.append(self.alloc, '/');
+                first = false;
+                try buf.appendSlice(self.alloc, v.string);
+            }
+            return Value{ .string = try buf.toOwnedSlice(self.alloc) };
+        }
+        if (std.mem.eql(u8, method, "split") or std.mem.eql(u8, method, "dir") or std.mem.eql(u8, method, "base") or std.mem.eql(u8, method, "ext") or std.mem.eql(u8, method, "stem") or std.mem.eql(u8, method, "isabs")) {
+            if (arg_vals.len != 1 or arg_vals[0] != .string) return ParseError.TypeError;
+            const p = arg_vals[0].string;
+            if (std.mem.eql(u8, method, "isabs")) {
+                var abs = false;
+                if (p.len >= 1 and (p[0] == '/' or p[0] == '\\')) abs = true;
+                if (p.len >= 2 and p[1] == ':' and ((p[0] >= 'A' and p[0] <= 'Z') or (p[0] >= 'a' and p[0] <= 'z'))) abs = true;
+                return Value{ .number = if (abs) 1 else 0 };
+            }
+            var s = p;
+            while (s.len > 1 and (s[s.len - 1] == '/' or s[s.len - 1] == '\\')) {
+                var allsep = true;
+                for (s) |ch| {
+                    if (ch != '/' and ch != '\\') {
+                        allsep = false;
+                        break;
+                    }
+                }
+                if (allsep) break;
+                if (s.len == 3 and s[1] == ':' and (s[2] == '/' or s[2] == '\\')) break;
+                s = s[0 .. s.len - 1];
+            }
+            var cut: ?usize = null;
+            var i: usize = s.len;
+            while (i > 0) {
+                i -= 1;
+                if (s[i] == '/' or s[i] == '\\') {
+                    cut = i;
+                    break;
+                }
+            }
+            const dir = if (cut) |c| (if (c == 0) s[0..1] else s[0..c]) else "";
+            const base = if (cut) |c| s[c + 1 ..] else s;
+            if (std.mem.eql(u8, method, "split")) {
+                const out = try self.alloc.create(ListObj);
+                out.* = .{ .items = .empty };
+                try out.items.append(self.alloc, Value{ .string = try self.alloc.dupe(u8, dir) });
+                try out.items.append(self.alloc, Value{ .string = try self.alloc.dupe(u8, base) });
+                return Value{ .list = out };
+            }
+            if (std.mem.eql(u8, method, "dir")) return Value{ .string = try self.alloc.dupe(u8, dir) };
+            if (std.mem.eql(u8, method, "base")) return Value{ .string = try self.alloc.dupe(u8, base) };
+            var dot: ?usize = null;
+            var k: usize = base.len;
+            while (k > 0) {
+                k -= 1;
+                if (base[k] == '.') {
+                    dot = k;
+                    break;
+                }
+            }
+            const has_ext = dot != null and dot.? > 0;
+            if (std.mem.eql(u8, method, "ext")) {
+                if (!has_ext) return Value{ .string = try self.alloc.dupe(u8, "") };
+                return Value{ .string = try self.alloc.dupe(u8, base[dot.? + 1 ..]) };
+            }
+            if (!has_ext) return Value{ .string = try self.alloc.dupe(u8, base) };
+            return Value{ .string = try self.alloc.dupe(u8, base[0..dot.?]) };
+        }
+        if (std.mem.eql(u8, method, "norm")) {
+            if (arg_vals.len != 1 or arg_vals[0] != .string) return ParseError.TypeError;
+            const p = arg_vals[0].string;
+            var buf: std.ArrayList(u8) = .empty;
+            for (p) |ch| try buf.append(self.alloc, if (ch == '\\') '/' else ch);
+            const s = buf.items;
+            var prefix_end: usize = 0;
+            var drive = false;
+            if (s.len >= 2 and s[1] == ':' and ((s[0] >= 'A' and s[0] <= 'Z') or (s[0] >= 'a' and s[0] <= 'z'))) {
+                prefix_end = 2;
+                drive = true;
+            }
+            var rooted = false;
+            if (prefix_end < s.len and s[prefix_end] == '/') {
+                rooted = true;
+                prefix_end += 1;
+            }
+            var parts: std.ArrayList([]const u8) = .empty;
+            var si: usize = prefix_end;
+            while (si <= s.len) {
+                var ei = si;
+                while (ei < s.len and s[ei] != '/') : (ei += 1) {}
+                if (ei > si) {
+                    const seg = s[si..ei];
+                    if (std.mem.eql(u8, seg, ".")) {
+                    } else if (std.mem.eql(u8, seg, "..")) {
+                        if (parts.items.len > 0 and !std.mem.eql(u8, parts.items[parts.items.len - 1], "..")) {
+                            _ = parts.pop();
+                        } else if (!rooted and !drive) {
+                            try parts.append(self.alloc, seg);
+                        }
+                    } else {
+                        try parts.append(self.alloc, seg);
+                    }
+                }
+                si = ei + 1;
+            }
+            var ob: std.ArrayList(u8) = .empty;
+            try ob.appendSlice(self.alloc, s[0..prefix_end]);
+            for (parts.items) |seg| {
+                if (ob.items.len > 0) {
+                    const last = ob.items[ob.items.len - 1];
+                    if (last != '/' and last != ':') try ob.append(self.alloc, '/');
+                }
+                try ob.appendSlice(self.alloc, seg);
+            }
+            if (ob.items.len == 0) return Value{ .string = try self.alloc.dupe(u8, "") };
+            return Value{ .string = try ob.toOwnedSlice(self.alloc) };
+        }
+        if (std.mem.eql(u8, method, "short")) {
+            if (arg_vals.len != 1 or arg_vals[0] != .string) return ParseError.TypeError;
+            const nm = Parser.fatName83(arg_vals[0].string) orelse return ParseError.TypeError;
+            var ni: usize = 8;
+            while (ni > 0 and nm[ni - 1] == ' ') : (ni -= 1) {}
+            var ei: usize = 3;
+            while (ei > 0 and nm[8 + ei - 1] == ' ') : (ei -= 1) {}
+            var buf: [12]u8 = undefined;
+            @memcpy(buf[0..ni], nm[0..ni]);
+            var ln = ni;
+            if (ei > 0) {
+                buf[ln] = '.';
+                ln += 1;
+                @memcpy(buf[ln .. ln + ei], nm[8 .. 8 + ei]);
+                ln += ei;
+            }
+            return Value{ .string = try self.alloc.dupe(u8, buf[0..ln]) };
+        }
+        if (std.mem.eql(u8, method, "is83")) {
+            if (arg_vals.len != 1 or arg_vals[0] != .string) return ParseError.TypeError;
+            return Value{ .number = if (Parser.fatName83(arg_vals[0].string) != null) 1 else 0 };
+        }
+        if (!self.mute) std.debug.print("error on line {d}: unknown path.{s} (have join/split/dir/base/ext/stem/isabs/norm/short/is83)\n", .{ self.line, method });
+        return ParseError.UnknownFunction;
+    }
+
     fn callModuleMethod(self: *Parser, module: []const u8, method: []const u8, arg_vals: []const Value) anyerror!Value {
         if (std.mem.eql(u8, module, "physics")) {
             return try self.callPhysicsMethod(method, arg_vals);
@@ -3978,6 +4219,12 @@ const Parser = struct {
         }
         if (std.mem.eql(u8, module, "fat")) {
             return try self.callFatMethod(method, arg_vals);
+        }
+        if (std.mem.eql(u8, module, "args")) {
+            return try self.callArgsMethod(method, arg_vals);
+        }
+        if (std.mem.eql(u8, module, "path")) {
+            return try self.callPathMethod(method, arg_vals);
         }
         if (std.mem.eql(u8, module, "http")) {
             return try self.callHttpMethod(method, arg_vals);
@@ -7830,6 +8077,8 @@ const JsonParser = struct {
             .imported_block = self.imported_block,
             .imported_task = self.imported_task,
             .imported_fat = self.imported_fat,
+            .imported_args = self.imported_args,
+            .imported_path = self.imported_path,
             .imported_http = self.imported_http,
             .imported_vga = self.imported_vga,
             .imported_vgatogui = self.imported_vgatogui,

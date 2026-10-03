@@ -1588,7 +1588,7 @@ pub const Emitter = struct {
         const mod = try self.parseIdent();
         try self.expectEnd();
         if (self.fs) return self.fail("import {s} not in freestanding emit", .{mod});
-        if (std.mem.eql(u8, mod, "os") or std.mem.eql(u8, mod, "physics") or std.mem.eql(u8, mod, "time") or std.mem.eql(u8, mod, "cpu") or std.mem.eql(u8, mod, "heap") or std.mem.eql(u8, mod, "json") or std.mem.eql(u8, mod, "hex") or std.mem.eql(u8, mod, "random") or std.mem.eql(u8, mod, "strings") or std.mem.eql(u8, mod, "csv") or std.mem.eql(u8, mod, "mem") or std.mem.eql(u8, mod, "block") or std.mem.eql(u8, mod, "fat")) {
+        if (std.mem.eql(u8, mod, "os") or std.mem.eql(u8, mod, "physics") or std.mem.eql(u8, mod, "time") or std.mem.eql(u8, mod, "cpu") or std.mem.eql(u8, mod, "heap") or std.mem.eql(u8, mod, "json") or std.mem.eql(u8, mod, "hex") or std.mem.eql(u8, mod, "random") or std.mem.eql(u8, mod, "strings") or std.mem.eql(u8, mod, "csv") or std.mem.eql(u8, mod, "mem") or std.mem.eql(u8, mod, "block") or std.mem.eql(u8, mod, "fat") or std.mem.eql(u8, mod, "args") or std.mem.eql(u8, mod, "path")) {
             try self.mods.put(try self.alloc.dupe(u8, mod), true);
             return;
         }
@@ -2494,6 +2494,26 @@ pub const Emitter = struct {
                 }
             }
             if (cfn == null) return self.fail("unknown fat.{s} in emit v1", .{method});
+        } else if (std.mem.eql(u8, module, "args")) {
+            if (!self.mods.contains("args")) return self.fail("'args' used without 'import args'", .{});
+            const known_args = [_][]const u8{ "flag", "opt", "rest" };
+            for (known_args) |k| {
+                if (std.mem.eql(u8, method, k)) {
+                    cfn = try std.fmt.allocPrint(self.alloc, "c4_args_{s}", .{method});
+                    break;
+                }
+            }
+            if (cfn == null) return self.fail("unknown args.{s} in emit v1", .{method});
+        } else if (std.mem.eql(u8, module, "path")) {
+            if (!self.mods.contains("path")) return self.fail("'path' used without 'import path'", .{});
+            const known_path = [_][]const u8{ "join", "split", "dir", "base", "ext", "stem", "isabs", "norm", "short", "is83" };
+            for (known_path) |k| {
+                if (std.mem.eql(u8, method, k)) {
+                    cfn = try std.fmt.allocPrint(self.alloc, "c4_path_{s}", .{method});
+                    break;
+                }
+            }
+            if (cfn == null) return self.fail("unknown path.{s} in emit v1", .{method});
         } else if (std.mem.eql(u8, module, "task")) {
             return self.fail("'task' is script-only (cooperative tasks need shared state); run it with c4c, not --emit-c", .{});
         } else if (std.mem.eql(u8, module, "cpu")) {

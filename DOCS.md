@@ -1,4 +1,4 @@
-# C4Plus — Complete Docs (v0.4.3)
+# C4Plus — Complete Docs (v0.4.4)
 
 C4Plus (`.c4p`) is a small scripting language with headers (`.c4h`),
 assembly sidecars (`.c4asm`), batch files (`.c4bht`), projects
@@ -397,6 +397,23 @@ fat.write(v, "hi.txt", fat.read(v, "hi.txt"))
 fat.ls(v)                  # -> ["HI.TXT"] (root dir only, 8.3 uppercased)
 fat.delete(v, "hi.txt")    # -> 1 (0 when missing)
 # missing file / no space / bad fs are catchable with try/catch
+
+import args                # CLI flags (compiles to native too)
+args.flag("verbose")       # -> 1/0 (--verbose or -verbose)
+args.opt("out", "a.bin")   # --out x or --out=x, else default (last wins)
+args.rest()                # positionals: non-dash args (`--` ends flags,
+                           # always skipped). NOTE: rest() is stateless —
+                           # an opt value stays in rest(); use `--` or
+                           # dash-led values to separate cleanly.
+
+import path                # path surgery (compiles to native too)
+path.join(["a", "b"])      # -> "a/b" (skips empties)
+path.split("a/b/c.txt")    # -> ["a/b", "c.txt"] (also dir/base)
+path.ext("c.tar.gz")       # -> "gz" (stem -> "c.tar"; dotfiles have none)
+path.isabs("C:/x")         # -> 1 (leading /, \, or drive: all count)
+path.norm("a/./b/../c")    # -> "a/c" (lexical; keeps / roots, X: drives)
+path.short("hello.txt")    # -> "HELLO.TXT" (8.3, same rules as fat)
+path.is83("a.b")           # -> 1/0
 ```
 
 ## 7. Assembly side by side (`.c4asm`)

@@ -1,0 +1,14 @@
+# path basics: join/split/dir/base/ext/stem/isabs/norm/short/is83
+import path
+print ("join=" + path.join(["a", "b", "c"]))
+print ("split=" + str(path.split("a/b/c.txt")))
+print ("dir=" + path.dir("a/b/c.txt"))
+print ("base=" + path.base("a/b/"))
+print ("ext=" + path.ext("a/b/c.tar.gz"))
+print ("stem=" + path.stem("a/b/c.tar.gz"))
+print ("abs=" + str(path.isabs("C:/x")) + str(path.isabs("rel/x")))
+print ("norm=" + path.norm("a/./b/../c"))
+print ("short=" + path.short("hello.txt"))
+print ("is83=" + str(path.is83("a.b")) + str(path.is83("toolongname.txt")))
+try { path.join(["a", 5]) } catch e { print ("caught: " + e) }
+try { path.short("a.b.c") } catch e { print ("caught2: " + e) }

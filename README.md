@@ -466,6 +466,20 @@ import task                # cooperative tasks, script-only
 task.spawn("worker")       # named zero-arg fn, run as steps
 task.yield()               # locals do not survive yield (protothreads)
 task.run()                 # until no task alive
+
+import args                # CLI flags (compiles to native too)
+args.flag("verbose")       # -> 1/0 (--verbose or -verbose)
+args.opt("out", "a.bin")  # --out x or --out=x, else default (last wins)
+args.rest()                # positionals (non-dash args; `--` ends flags)
+
+import path                # path surgery (compiles to native too)
+path.join(["a", "b"])      # -> "a/b" (skips empties)
+path.split("a/b/c.txt")    # -> ["a/b", "c.txt"] (also dir/base)
+path.ext("c.tar.gz")       # -> "gz" (stem -> "c.tar")
+path.isabs("C:/x")         # -> 1 (/, \, drive: count)
+path.norm("a/./b/../c")    # -> "a/c" (lexical, / separators)
+path.short("hello.txt")    # -> "HELLO.TXT" (8.3 for fat)
+path.is83("a.b")           # -> 1/0
 ```
 
 ---
@@ -834,6 +848,9 @@ stays out of git; public releases go through GitHub releases.
   freestanding builtins (COM1 log channel, `74_serial`, QEMU-verified).
   Plus a toolchain-drift fix documented in DOCS QEMU notes (current MinGW
   `ld` needs `--image-base 0x0` with the kernel linker scripts).
+- **0.4.4 (this):** small patch, two utility modules — `args` (`flag/opt/
+  rest`, `--x`/`--x=v`/`--` forms, native-compiled) and `path` (`join/
+  split/dir/base/ext/stem/isabs/norm/short/is83`, native-compiled).
 - After that: writable filesystem, more drivers, fuller shell.
 
 ---

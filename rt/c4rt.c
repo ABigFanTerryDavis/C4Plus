@@ -3037,6 +3037,360 @@ C4Val c4_fat_delete(C4Val h, C4Val n) {
     return c4_num(1);
 }
 
+/* ======== args + path modules (0.4.3 patch): CLI flag parsing and path
+   manipulation. Pure logic, identical rules on both sides. ======== */
+
+static int c4_arg_dashed(const char *s) {
+    return s[0] == '-' && s[1] != 0;
+}
+
+static const char *c4_arg_name(const char *s) {
+    while (*s == '-')
+        s++;
+    return s;
+}
+
+C4Val c4_args_flag(C4Val n) {
+    if (n.t != C4_STR)
+        c4_err("TypeError");
+    const char *want = c4_arg_name(n.str);
+    for (int i = 0; i < c4_argc; i++) {
+        if (c4_arg_dashed(c4_argv[i]) && strcmp(c4_arg_name(c4_argv[i]), want) == 0)
+            return c4_num(1);
+    }
+    return c4_num(0);
+}
+
+C4Val c4_args_opt(C4Val n, C4Val d) {
+    if (n.t != C4_STR)
+        c4_err("TypeError");
+    const char *want = c4_arg_name(n.str);
+    C4Val found = d;
+    int has = 0;
+    for (int i = 0; i < c4_argc; i++) {
+        if (!c4_arg_dashed(c4_argv[i]))
+            continue;
+        const char *nm = c4_arg_name(c4_argv[i]);
+        const char *eq = strchr(nm, '=');
+        if (eq) {
+            size_t kl = (size_t)(eq - nm);
+            if (strlen(want) == kl && memcmp(nm, want, kl) == 0) {
+                found = c4_str(eq + 1);
+                has = 1;
+            }
+            continue;
+        }
+        if (strcmp(nm, want) == 0 && i + 1 < c4_argc) {
+            found = c4_str(c4_argv[i + 1]);
+            has = 1;
+            i++;
+        }
+    }
+    (void)has;
+    return found;
+}
+
+C4Val c4_args_rest(void) {
+    C4Val o = c4_list();
+    int closed = 0;
+    for (int i = 0; i < c4_argc; i++) {
+        if (strcmp(c4_argv[i], "--") == 0) {
+            closed = 1;
+            continue;
+        }
+        if (!closed && c4_arg_dashed(c4_argv[i]))
+            continue;
+        list_push(o.list, c4_str(c4_argv[i]));
+    }
+    return o;
+}
+
+static int c4_path_sep(char c) {
+    return c == '/' || c == '\\';
+}
+
+/* split stripped path into dir/base (no allocation; views into input). */
+static void c4_path_splitv(const char *p, const char **dir, size_t *dirn, const char **base, size_t *basen) {
+    size_t len = strlen(p);
+    while (len > 1 && c4_path_sep(p[len - 1])) {
+        int allsep = 1;
+        for (size_t i = 0; i < len; i++)
+            if (!c4_path_sep(p[i])) {
+                allsep = 0;
+                break;
+            }
+        if (allsep)
+            break;
+        if (len == 3 && p[1] == ':' && c4_path_sep(p[2]))
+            break;
+        len--;
+    }
+    size_t cut = len;
+    int found = 0;
+    for (size_t i = len; i > 0; i--) {
+        if (c4_path_sep(p[i - 1])) {
+            cut = i - 1;
+            found = 1;
+            break;
+        }
+    }
+    if (found) {
+        *dir = p;
+        *dirn = cut == 0 ? 1 : cut;
+        *base = p + cut + 1;
+        *basen = len - cut - 1;
+    } else {
+        *dir = "";
+        *dirn = 0;
+        *base = p;
+        *basen = len;
+    }
+}
+
+C4Val c4_path_join(C4Val l) {
+    if (l.t != C4_LIST)
+        c4_err("TypeError");
+    size_t total = 0;
+    for (size_t i = 0; i < l.list->len; i++) {
+        if (l.list->items[i].t != C4_STR)
+            c4_err("TypeError");
+        if (l.list->items[i].str[0])
+            total += strlen(l.list->items[i].str) + 1;
+    }
+    char *o = xmalloc(total + 1);
+    size_t pos = 0;
+    int first = 1;
+    for (size_t i = 0; i < l.list->len; i++) {
+        const char *s = l.list->items[i].str;
+        if (!s[0])
+            continue;
+        if (!first)
+            o[pos++] = '/';
+        first = 0;
+        size_t sl = strlen(s);
+        memcpy(o + pos, s, sl);
+        pos += sl;
+    }
+    o[pos] = 0;
+    C4Val v;
+    v.t = C4_STR;
+    v.str = o;
+    return v;
+}
+
+C4Val c4_path_split(C4Val p) {
+    if (p.t != C4_STR)
+        c4_err("TypeError");
+    const char *dir, *base;
+    size_t dirn, basen;
+    c4_path_splitv(p.str, &dir, &dirn, &base, &basen);
+    C4Val o = c4_list();
+    list_push(o.list, c4_strn(dir, dirn));
+    list_push(o.list, c4_strn(base, basen));
+    return o;
+}
+
+static C4Val c4_path_one(C4Val p, int which) {
+    if (p.t != C4_STR)
+        c4_err("TypeError");
+    const char *dir, *base;
+    size_t dirn, basen;
+    c4_path_splitv(p.str, &dir, &dirn, &base, &basen);
+    if (which == 0)
+        return c4_strn(dir, dirn);
+    return c4_strn(base, basen);
+}
+
+C4Val c4_path_dir(C4Val p) {
+    return c4_path_one(p, 0);
+}
+
+C4Val c4_path_base(C4Val p) {
+    return c4_path_one(p, 1);
+}
+
+static void c4_path_extv(const char *base, size_t basen, const char **stem, size_t *stemn, const char **ext, size_t *extn) {
+    size_t dot = basen;
+    int found = 0;
+    for (size_t i = basen; i > 0; i--) {
+        if (base[i - 1] == '.') {
+            dot = i - 1;
+            found = 1;
+            break;
+        }
+    }
+    if (found && dot > 0) {
+        *stem = base;
+        *stemn = dot;
+        *ext = base + dot + 1;
+        *extn = basen - dot - 1;
+    } else {
+        *stem = base;
+        *stemn = basen;
+        *ext = "";
+        *extn = 0;
+    }
+}
+
+C4Val c4_path_ext(C4Val p) {
+    if (p.t != C4_STR)
+        c4_err("TypeError");
+    const char *dir, *base;
+    size_t dirn, basen;
+    c4_path_splitv(p.str, &dir, &dirn, &base, &basen);
+    (void)dir;
+    (void)dirn;
+    const char *stem, *ext;
+    size_t stemn, extn;
+    c4_path_extv(base, basen, &stem, &stemn, &ext, &extn);
+    (void)stem;
+    (void)stemn;
+    return c4_strn(ext, extn);
+}
+
+C4Val c4_path_stem(C4Val p) {
+    if (p.t != C4_STR)
+        c4_err("TypeError");
+    const char *dir, *base;
+    size_t dirn, basen;
+    c4_path_splitv(p.str, &dir, &dirn, &base, &basen);
+    (void)dir;
+    (void)dirn;
+    const char *stem, *ext;
+    size_t stemn, extn;
+    c4_path_extv(base, basen, &stem, &stemn, &ext, &extn);
+    (void)ext;
+    (void)extn;
+    return c4_strn(stem, stemn);
+}
+
+C4Val c4_path_isabs(C4Val p) {
+    if (p.t != C4_STR)
+        c4_err("TypeError");
+    const char *s = p.str;
+    int abs = 0;
+    if (c4_path_sep(s[0]))
+        abs = 1;
+    if (s[0] && s[1] == ':' && ((s[0] >= 'A' && s[0] <= 'Z') || (s[0] >= 'a' && s[0] <= 'z')))
+        abs = 1;
+    return c4_num(abs);
+}
+
+C4Val c4_path_norm(C4Val p) {
+    if (p.t != C4_STR)
+        c4_err("TypeError");
+    const char *s = p.str;
+    size_t len = strlen(s);
+    char *t = xmalloc(len + 1);
+    for (size_t i = 0; i < len; i++)
+        t[i] = s[i] == '\\' ? '/' : s[i];
+    t[len] = 0;
+    size_t pre = 0;
+    int drive = 0, rooted = 0;
+    if (len >= 2 && t[1] == ':' && ((t[0] >= 'A' && t[0] <= 'Z') || (t[0] >= 'a' && t[0] <= 'z'))) {
+        pre = 2;
+        drive = 1;
+    }
+    if (t[pre] == '/') {
+        rooted = 1;
+        pre++;
+    }
+    char *stack[512];
+    size_t stackn[512];
+    size_t nstk = 0;
+    size_t si = pre;
+    while (si <= len) {
+        size_t ei = si;
+        while (ei < len && t[ei] != '/')
+            ei++;
+        if (ei > si) {
+            size_t sl = ei - si;
+            if (sl == 1 && t[si] == '.') {
+            } else if (sl == 2 && t[si] == '.' && t[si + 1] == '.') {
+                if (nstk > 0 && !(stackn[nstk - 1] == 2 && stack[nstk - 1][0] == '.' && stack[nstk - 1][1] == '.')) {
+                    nstk--;
+                } else if (!rooted && !drive && nstk < 512) {
+                    stack[nstk] = t + si;
+                    stackn[nstk] = sl;
+                    nstk++;
+                }
+            } else if (nstk < 512) {
+                stack[nstk] = t + si;
+                stackn[nstk] = sl;
+                nstk++;
+            }
+        }
+        si = ei + 1;
+    }
+    char *o = xmalloc(len + 8);
+    size_t pos = 0;
+    memcpy(o, t, pre);
+    pos = pre;
+    for (size_t i = 0; i < nstk; i++) {
+        if (pos > 0 && o[pos - 1] != '/' && o[pos - 1] != ':')
+            o[pos++] = '/';
+        memcpy(o + pos, stack[i], stackn[i]);
+        pos += stackn[i];
+    }
+    o[pos] = 0;
+    free(t);
+    C4Val v;
+    v.t = C4_STR;
+    v.str = o;
+    return v;
+}
+
+static int c4_path_83(const char *s, char pretty[13]) {
+    size_t len = strlen(s);
+    if (len == 0 || len > 12)
+        return -1;
+    const char *dot = strchr(s, '.');
+    if (dot && strchr(dot + 1, '.'))
+        return -1;
+    size_t ni = dot ? (size_t)(dot - s) : len;
+    size_t ei = dot ? (size_t)(dot + 1 - s) : len;
+    if (ni == 0 || ni > 8 || len - ei > 3)
+        return -1;
+    char nm[11];
+    for (int i = 0; i < 11; i++)
+        nm[i] = ' ';
+    for (size_t i = 0; i < ni; i++)
+        nm[i] = (char)toupper((unsigned char)s[i]);
+    for (size_t i = ei; i < len; i++)
+        nm[8 + i - ei] = (char)toupper((unsigned char)s[i]);
+    size_t a = 8;
+    while (a > 0 && nm[a - 1] == ' ')
+        a--;
+    size_t b = 3;
+    while (b > 0 && nm[8 + b - 1] == ' ')
+        b--;
+    memcpy(pretty, nm, a);
+    size_t ln = a;
+    if (b > 0) {
+        pretty[ln++] = '.';
+        memcpy(pretty + ln, nm + 8, b);
+        ln += b;
+    }
+    pretty[ln] = 0;
+    return 0;
+}
+
+C4Val c4_path_short(C4Val n) {
+    if (n.t != C4_STR)
+        c4_err("TypeError");
+    char pretty[13];
+    if (c4_path_83(n.str, pretty))
+        c4_err("TypeError");
+    return c4_str(pretty);
+}
+
+C4Val c4_path_is83(C4Val n) {
+    if (n.t != C4_STR)
+        c4_err("TypeError");
+    char pretty[13];
+    return c4_num(c4_path_83(n.str, pretty) == 0 ? 1 : 0);
+}
+
 /* ======== emit parity additions (0.3.5): json, hex, random, crc32,
    collections, strings extras, time extras. All errors route through
    c4_err so try/catch catches them like the interpreter. ======== */
